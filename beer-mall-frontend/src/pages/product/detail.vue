@@ -76,11 +76,12 @@ import { ref, computed } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import type { ProductDetail, Sku } from "@/types/product";
 import { useCartStore } from "@/store/cart";
+import { apiProductDetail } from "@/api/product";
+import { API_BASE_URL } from "@/config/api";
 
 const product = ref<ProductDetail | null>(null);
 const currentSku = ref<Sku | null>(null);
 const quantity = ref(1);
-const baseUrl = "https://localhost:7252";
 const cartStore = useCartStore();
 
 // 计算属性：尝试从规格名中提取单位（例如 "330ml/杯" 提取 "杯"）
@@ -93,20 +94,17 @@ const unitName = computed(() => {
 });
 
 // 加载数据
-const loadProductDetail = (id: string) => {
-  uni.request({
-    url: `${baseUrl}/api/product/${id}`,
-    method: "GET",
-    success: (res: any) => {
-      if (res.statusCode === 200) {
-        product.value = res.data;
-        // 🔥 初始化：默认选中第一个规格
-        if (product.value?.skus?.length > 0) {
-          selectSku(product.value.skus[0]);
-        }
-      }
-    },
-  });
+const loadProductDetail = async (id: string) => {
+  try {
+    const res = await apiProductDetail(Number(id));
+    product.value = res;
+    // 🔥 初始化：默认选中第一个规格
+    if (product.value?.skus?.length > 0) {
+      selectSku(product.value.skus[0]);
+    }
+  } catch (e) {
+    console.error("加载商品详情失败", e);
+  }
 };
 
 // 选择规格 (Command)
@@ -120,7 +118,11 @@ const addToCart = async () => {
   if (!currentSku.value) return;
 
   // 1. 等待后端 API 执行完毕 (关键！确保数据库已经存进去了)
-  await cartStore.addToCart(product.value!, currentSku.value!, quantity.value);
+  await cartStore.addToCart({
+    productId: product.value!.id,
+    skuId: currentSku.value!.id,
+    quantity: quantity.value,
+  });
 
   // 2. 显示成功提示
   uni.showToast({
@@ -143,7 +145,7 @@ const getImageUrl = (path: string | undefined) => {
   if (!path) return "";
   if (path.startsWith("http")) return path;
   if (path.startsWith("/static")) return path;
-  return baseUrl + path;
+  return API_BASE_URL + path;
 };
 
 onLoad((options) => {

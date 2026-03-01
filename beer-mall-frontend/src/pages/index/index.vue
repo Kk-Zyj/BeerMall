@@ -76,9 +76,10 @@
 // --- Navigation Commands ---
 import { ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
-import { useUserStore } from "@/store/user";
+import { useAuthStore } from "@/store/auth";
+import { API_BASE_URL } from "@/config/api";
 
-const userStore = useUserStore();
+const userStore = useAuthStore();
 
 // --- ViewModel State ---
 
@@ -96,7 +97,7 @@ const loadStoreSettings = () => {
 
   // 这里演示动态改变（你可以换成你刚才上传的那张 "Hi bro" 的图的地址）
   // 假设你的图片放在 backend 的 wwwroot/images/home_banner.jpg
-  bannerUrl.value = "https://localhost:7252/images/home_banner.jpg";
+  bannerUrl.value = `${API_BASE_URL}/images/home_banner.jpg`;
 };
 
 onLoad((options) => {
@@ -117,9 +118,9 @@ const goToMenu = () => {
 
 // 跳转到订单/购物车 (Tab页)
 // 跳转订单页
-const goToOrders = (status: number) => {
+const goToOrders = async (status: number) => {
   // 使用 checkAuth 统一守卫，没登录点击订单也会弹窗
-  if (!userStore.checkAuth()) return;
+  if (!(await userStore.checkAuth())) return;
   uni.navigateTo({ url: `/pages/order/list?status=${status}` });
 };
 

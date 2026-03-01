@@ -196,9 +196,11 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
-import { useUserStore } from "@/store/user";
+import { useAuthStore } from "@/store/auth";
 import { onShareAppMessage } from "@dcloudio/uni-app";
 import uniPopup from "@dcloudio/uni-ui/lib/uni-popup/uni-popup.vue";
+import { apiOrderDetail, apiOrderPay, apiOrderCancel } from "@/api/order";
+import { API_BASE_URL } from "@/config/api";
 
 const task = ref<any>(null); // 裂变数据
 const groupBuy = ref<any>(null); // 拼团实例数据
@@ -213,8 +215,7 @@ const taskTimeLeft = ref(0); // 剩余秒数
 const taskTimeStr = ref(""); // 格式化字符串 (dd天hh小时)
 let taskTimer: any = null;
 
-const userStore = useUserStore();
-const baseUrl = "https://localhost:7252";
+const userStore = useAuthStore();
 const order = ref<any>(null);
 const countdown = ref(0); // 剩余秒数
 const countdownStr = ref(""); // 格式化后的字符串 (mm:ss)
@@ -253,30 +254,28 @@ onLoad((options) => {
   }
 });
 
-const loadOrderDetail = (id: string) => {
-  uni.request({
-    url: `${baseUrl}/api/order/${id}?userId=${userStore.userInfo.id}`,
-    success: (res: any) => {
-      if (res.statusCode === 200) {
-        order.value = res.data.order || res.data;
-        task.value = res.data.task || null;
-        groupBuy.value = res.data.groupBuy || null;
+const loadOrderDetail = async (id: string) => {
+  try {
+    const res = await apiOrderDetail(Number(id), userStore.userInfo.id);
+    order.value = res.order || res;
+    task.value = res.task || null;
+    groupBuy.value = res.groupBuy || null;
 
-        // 启动【订单支付】倒计时 (30分钟)
-        if (order.value.status === 0) {
-          startOrderTimer(order.value.createTime);
-        }
+    // 启动【订单支付】倒计时 (30分钟)
+    if (order.value.status === 0) {
+      startOrderTimer(order.value.createTime);
+    }
 
-        // 启动【任务/拼团】倒计时 (按过期时间)
-        // 优先判断拼团，再判断裂变
-        if (groupBuy.value && groupBuy.value.status === 0) {
-          startTaskTimer(groupBuy.value.expireTime);
-        } else if (task.value && task.value.status === 0) {
-          startTaskTimer(task.value.expireTimeStr || task.value.expireTime);
-        }
-      }
-    },
-  });
+    // 启动【任务/拼团】倒计时 (按过期时间)
+    // 优先判断拼团，再判断裂变
+    if (groupBuy.value && groupBuy.value.status === 0) {
+      startTaskTimer(groupBuy.value.expireTime);
+    } else if (task.value && task.value.status === 0) {
+      startTaskTimer(task.value.expireTimeStr || task.value.expireTime);
+    }
+  } catch (e) {
+    console.error("加载订单详情失败", e);
+  }
 };
 
 // --- 定时器逻辑 A：订单支付 (30分钟限制) ---
@@ -399,15 +398,14 @@ const payOrder = () => {
     success: (res) => {
       if (res.confirm) {
         uni.showLoading({ title: "支付中" });
-        uni.request({
-          url: `${baseUrl}/api/order/${order.value.id}/pay`, // 调用后端
-          method: "POST",
-          success: () => {
-            uni.hideLoading();
-            uni.showToast({ title: "支付成功" });
-            // 🔥 支付成功后，重新加载当前页面详情，刷新状态
-            loadOrderDetail(order.value.id);
-          },
+        apiOrderPay(order.value.id).then(() => {
+          uni.hideLoading();
+          uni.showToast({ title: "支付成功" });
+          // 🔥 支付成功后，重新加载当前页面详情，刷新状态
+          loadOrderDetail(String(order.value.id));
+        }).catch((e: any) => {
+          uni.hideLoading();
+          uni.showToast({ title: e?.message || "支付失败", icon: "none" });
         });
       }
     },
@@ -423,26 +421,23 @@ const cancelOrder = () => {
     content: content,
     success: (res) => {
       if (res.confirm) {
-        uni.request({
-          url: `${baseUrl}/api/order/${order.value.id}/cancel`,
-          method: "POST",
-          success: (res: any) => {
-            if (res.statusCode === 200) {
-              uni.showToast({ title: "订单已取消" });
-            } else {
-              uni.showToast({ title: "取消失败，请重试" + res.data });
-            }
-          },
-        });
+        apiOrderCancel(order.value.id)
+          .then(() => {
+            uni.showToast({ title: "订单已取消" });
+          })
+          .catch((e: any) => {
+            uni.showToast({ title: "取消失败，请重试" + (e?.message || "") });
+          });
       }
     },
   });
 };
 
 // 工具函数
-const getImageUrl = (path: string | undefined) => {if (!path) return "/static/logo.png";
+const getImageUrl = (path: string | undefined) => {
+  if (!path) return "/static/logo.png";
   if (path.startsWith("http") || path.startsWith("/static")) return path;
-  return baseUrl + path;
+  return API_BASE_URL + path;
 };
 
 const formatTime = (t: string) => {

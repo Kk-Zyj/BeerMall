@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onLaunch, onShow, onHide } from "@dcloudio/uni-app";
-import { useUserStore } from "@/store/user";
+import { useAuthStore } from "@/store/auth";
 
-const userStore = useUserStore();
+const userStore = useAuthStore();
 
 onLaunch(() => {
   console.log("App Launch");

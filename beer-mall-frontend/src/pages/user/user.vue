@@ -81,18 +81,18 @@
 </template>
 
 <script setup lang="ts">
-import { useUserStore } from "@/store/user";
+import { useAuthStore } from "@/store/auth";
 // 🔥 引入组件 (请确保路径正确)
 import LoginPopup from "@/components/login-popup/login-popup.vue";
 
-const userStore = useUserStore();
+const userStore = useAuthStore();
 
 // 点击头部逻辑
-const handleUserClick = () => {
+const handleUserClick = async () => {
   // checkAuth 会自动判断：
   // 1. 如果没手机号 -> 自动把 showLoginPopup 设为 true -> 弹窗
   // 2. 如果有手机号 -> 返回 true -> 进入下面逻辑
-  if (userStore.checkAuth()) {
+  if (await userStore.checkAuth()) {
     // 已是正式会员，跳转去修改个人资料(头像/昵称)
     uni.navigateTo({ url: "/pages/my/profile" });
   }
@@ -111,15 +111,15 @@ const handleLogout = () => {
 };
 
 // 跳转订单页
-const goToOrderList = (status: number) => {
+const goToOrderList = async (status: number) => {
   // 使用 checkAuth 统一守卫，没登录点击订单也会弹窗
-  if (!userStore.checkAuth()) return;
+  if (!(await userStore.checkAuth())) return;
   uni.navigateTo({ url: `/pages/order/list?status=${status}` });
 };
 
 // 跳转地址页
-const goToAddress = () => {
-  if (!userStore.checkAuth()) return;
+const goToAddress = async () => {
+  if (!(await userStore.checkAuth())) return;
   uni.navigateTo({ url: "/pages/address/list" });
 };
 </script>

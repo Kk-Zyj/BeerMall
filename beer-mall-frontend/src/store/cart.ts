@@ -1,82 +1,125 @@
+// src/store/cart.ts
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { useUserStore } from '@/store/user'
+import { useAuthStore } from '@/store/auth'
+import { apiGetCart, apiCartAdd, apiClearCart, type CartItem } from '@/api/cart'
+import { ApiError } from '@/api/request'
+
+function toast(msg: string) {
+  uni.showToast({ title: msg, icon: 'none' })
+}
 
 export const useCartStore = defineStore('cart', () => {
-  const baseUrl = 'https://localhost:7252'
-  const cartList = ref<any[]>([]) // 购物车列表
+  const auth = useAuthStore()
 
-  // 计算属性：总数量
-  const totalCount = computed(() => {
-    return cartList.value.reduce((sum, item) => sum + item.quantity, 0)
-  })
+  const cartList = ref<CartItem[]>([])
 
-  // 计算属性：总金额
-  const totalPrice = computed(() => {
-    return cartList.value.reduce(
-      (sum, item) => sum + item.quantity * item.price,
+  const totalCount = computed(() =>
+    cartList.value.reduce((sum, it) => sum + (it.quantity || 0), 0),
+  )
+  const totalPrice = computed(() =>
+    cartList.value.reduce(
+      (sum, it) => sum + (it.quantity || 0) * (it.price || 0),
       0,
-    )
-  })
+    ),
+  )
 
-  // Action: 获取最新购物车
-  const fetchCart = async () => {
-    console.log('当前用户信息:', userStore.userInfo)
-    // 如果是 undefined，说明上面第1步的字段映射没做好
-    if (!userStore.userInfo?.id) {
-      console.error('用户ID不存在，无法获取购物车')
-      return
+  async function _ensureUserId(): Promise<number> {
+    // 购物车允许影子用户
+    const ok = await auth.checkAuth(false)
+    if (!ok || !auth.userInfo?.id) throw new Error('用户未初始化')
+    return auth.userInfo.id
+  }
+
+  async function refresh() {
+    const userId = await _ensureUserId()
+    const res = await apiGetCart(userId)
+    cartList.value = res?.items ?? []
+  }
+
+  async function addToCart(payload: {
+    productId: number
+    skuId: number
+    quantity: number
+  }) {
+    const userId = await _ensureUserId()
+    const res = await apiCartAdd({ userId, ...payload })
+    cartList.value = res?.items ?? []
+  }
+
+  async function increase(item: CartItem, step = 1) {
+    await addToCart({
+      productId: item.productId,
+      skuId: item.skuId,
+      quantity: Math.abs(step),
+    })
+  }
+
+  async function decrease(item: CartItem, step = 1) {
+    await addToCart({
+      productId: item.productId,
+      skuId: item.skuId,
+      quantity: -Math.abs(step),
+    })
+  }
+
+  /**
+   * 改数量：后端无 setQuantity，用 delta 实现
+   * delta = newQty - oldQty，走 /api/Cart/add
+   */
+  async function setQuantity(item: CartItem, newQty: number) {
+    newQty = Math.max(0, Math.floor(newQty))
+    const oldQty = item.quantity || 0
+    const delta = newQty - oldQty
+    if (delta === 0) return
+    await addToCart({
+      productId: item.productId,
+      skuId: item.skuId,
+      quantity: delta,
+    })
+  }
+
+  // 删除单条：delta = -当前数量
+  async function removeItem(item: CartItem) {
+    const qty = item.quantity || 0
+    if (qty <= 0) return
+    await addToCart({
+      productId: item.productId,
+      skuId: item.skuId,
+      quantity: -qty,
+    })
+  }
+
+  async function clear() {
+    const userId = await _ensureUserId()
+    await apiClearCart(userId)
+    cartList.value = []
+    uni.showToast({ title: '购物车已清空', icon: 'success' })
+  }
+
+  // 统一错误包装（页面调用更省心）
+  async function safeRun<T>(fn: () => Promise<T>) {
+    try {
+      return await fn()
+    } catch (e: any) {
+      const msg = e instanceof ApiError ? e.message : e?.message || '操作失败'
+      toast(msg)
+      throw e
     }
-    uni.request({
-      url: `${baseUrl}/api/cart?userId=${userStore.userInfo.id}`,
-      success: (res: any) => {
-        cartList.value = res.data.items || []
-      },
-    })
   }
 
-  const userStore = useUserStore()
-  // Action: 加购/减购
-  const addToCart = async (product: any, sku: any, quantity: number) => {
-    const realUserId = userStore.userInfo.id
-    console.info('realUserId:', realUserId)
-    uni.request({
-      url: `${baseUrl}/api/cart/add`,
-      method: 'POST',
-      data: {
-        userId: realUserId, // 实际开发从 userStore 获取
-        productId: product.id,
-        skuId: sku.id,
-        quantity: quantity,
-      },
-      success: (res: any) => {
-        // 后端直接返回了最新的购物车结构，直接覆盖本地
-        cartList.value = res.data.items
-      },
-    })
+  return {
+    cartList,
+    totalCount,
+    totalPrice,
+    refresh: () => safeRun(refresh),
+    addToCart: (p: { productId: number; skuId: number; quantity: number }) =>
+      safeRun(() => addToCart(p)),
+    increase: (item: CartItem, step = 1) => safeRun(() => increase(item, step)),
+    decrease: (item: CartItem, step = 1) => safeRun(() => decrease(item, step)),
+    setQuantity: (item: CartItem, newQty: number) =>
+      safeRun(() => setQuantity(item, newQty)),
+    removeItem: (item: CartItem) => safeRun(() => removeItem(item)),
+    clear: () => safeRun(clear),
   }
-
-  // Action: 清空购物车
-  const clearCart = () => {
-    uni.request({
-      url: `${baseUrl}/api/cart/clear?userId=${userStore.userInfo.id}`,
-      method: 'DELETE',
-      success: (res: any) => {
-        if (res.statusCode === 200) {
-          // 1. 清空本地 Pinia 状态 (界面会瞬间变为空状态)
-          cartList.value = []
-
-          // 2. 提示用户
-          uni.showToast({ title: '购物车已清空', icon: 'success' })
-        } else {
-          uni.showToast({ title: '清空失败', icon: 'none' })
-        }
-      },
-      fail: () => {
-        uni.showToast({ title: '网络错误', icon: 'none' })
-      },
-    })
-  }
-
-  return { cartList, totalCount, totalPrice, fetchCart, addToCart, clearCart }
 })

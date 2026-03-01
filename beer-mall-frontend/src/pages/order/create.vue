@@ -183,18 +183,24 @@ import LoginPopup from "@/components/login-popup/login-popup.vue";
 import { ref, computed } from "vue";
 import { onShow, onLoad } from "@dcloudio/uni-app";
 import { useCartStore } from "@/store/cart";
-import { useUserStore } from "@/store/user";
+import { useAuthStore } from "@/store/auth";
 import { getDeviceId } from "@/utils/device";
 import type { GroupByRule } from "@/types/groupByRule";
+import { useOrderPay } from "@/composables/useOrderPay";
+import { API_BASE_URL } from "@/config/api";
+import { apiGetGroupRule } from "@/api/admin";
+import { apiMyAvailableCoupons } from "@/api/coupon";
+import { apiAddressList } from "@/api/address";
+import { apiCreateOrder } from "@/api/order";
 
 const cartStore = useCartStore();
-const baseUrl = "https://localhost:7252";
+const { payOrder } = useOrderPay();
 
 const currentAddress = ref<any>(null);
 const deliveryType = ref("express");
 const remark = ref("");
 const couponPrice = ref(0);
-const userStore = useUserStore();
+const userStore = useAuthStore();
 const targetGroupBuyId = ref(null); // 目标团ID
 
 const freightPrice = computed(() => {
@@ -214,30 +220,16 @@ const availableCoupons = ref([]); // 可用券列表
 const selectedCoupon = ref(null); // 已选中的券
 const selectCouponPopup = ref(null);
 
-onLoad((options) => {
-  uni.request({
-    url: `${baseUrl}/api/admin/0`,
-    method: "GET",
-    success: (res: any) => {
-      console.log("接口响应状态:", res.statusCode);
-      if (res.statusCode === 200) {
-        console.log("获取拼团规则成功:", res.data);
-        // 如果后端返回的是被 Result 包裹的结构，可能需要 res.data.data
-        // 根据你上面的 C# 代码，直接返回的是 DTO，所以 res.data 是对的
-        groupRule.value = res.data;
-      } else {
-        console.error("获取规则失败:", res);
-      }
-    },
-    fail: (err) => {
-      console.error("网络请求失败:", err);
-    },
-  });
-  // 1. 接收上个页面传来的团ID
+onLoad(async (options) => {
+  try {
+    groupRule.value = await apiGetGroupRule();
+  } catch (err) {
+    console.error("获取规则失败:", err);
+  }
+
   if (options && options.groupBuyId) {
     targetGroupBuyId.value = options.groupBuyId;
-    // 自动切换 UI 为 "参团模式" (显示85折价格)
-    orderType.value = 2; // 假设 2 代表参团
+    orderType.value = 2;
   }
 });
 
@@ -286,21 +278,20 @@ const switchType = (type: number) => {
 };
 
 // --- 获取可用券列表 ---
-const loadMyCoupons = () => {
-  // 只在单独购买模式下才去查券
+const loadMyCoupons = async () => {
   if (orderType.value !== 0) return;
 
-  uni.request({
-    // 传当前商品总价给后端，后端只返回满足金额门槛的券
-    url: `${baseUrl}/api/app/coupon/my/available?userId=${userStore.userInfo.id}&orderAmount=${cartStore.totalPrice}`,
-    success: (res) => {
-      availableCoupons.value = res.data || [];
-      // 默认自动选中最大面额的券 (如果后端排好序了，取第一个即可)
-      if (availableCoupons.value.length > 0) {
-        selectedCoupon.value = availableCoupons.value[0];
-      }
-    },
-  });
+  try {
+    availableCoupons.value = await apiMyAvailableCoupons(
+      userStore.userInfo.id,
+      cartStore.totalPrice
+    );
+    if (availableCoupons.value.length > 0) {
+      selectedCoupon.value = availableCoupons.value[0];
+    }
+  } catch (e: any) {
+    uni.showToast({ title: e?.message || "加载优惠券失败", icon: "none" });
+  }
 };
 
 // --- 打开与选择券 ---
@@ -334,16 +325,16 @@ onShow(() => {
   loadMyCoupons(); // 加载可用券列表
 });
 
-const loadDefaultAddress = () => {
-  uni.request({
-    url: `${baseUrl}/api/address?userId=${userStore.userInfo.id}`,
-    success: (res: any) => {
-      if (res.data && res.data.length > 0) {
-        const def = res.data.find((a: any) => a.isDefault) || res.data[0];
-        currentAddress.value = def;
-      }
-    },
-  });
+const loadDefaultAddress = async () => {
+  try {
+    const list = await apiAddressList(userStore.userInfo.id);
+    if (list && list.length > 0) {
+      const def = list.find((a: any) => a.isDefault) || list[0];
+      currentAddress.value = def;
+    }
+  } catch (e: any) {
+    uni.showToast({ title: e?.message || "加载地址失败", icon: "none" });
+  }
 };
 
 const chooseAddress = () => {
@@ -360,10 +351,9 @@ const openCoupon = () => {
   uni.showToast({ title: "暂无可用优惠券", icon: "none" });
 };
 
-const submitOrder = () => {
-  // ... 校验逻辑 ...
+const submitOrder = async () => {
   console.info("提交订单前检查权限");
-  if (!userStore.checkAuth()) return; // 检查是否存在手机号
+  if (!(await userStore.checkAuth())) return;
   if (deliveryType.value !== "self" && !currentAddress.value) {
     uni.showToast({ title: "请选择收货地址", icon: "none" });
     return;
@@ -382,76 +372,28 @@ const submitOrder = () => {
 
   uni.showLoading({ title: "正在下单..." });
 
-  uni.request({
-    url: `${baseUrl}/api/order/create`,
-    method: "POST",
-    data: postData,
-    success: async (res: any) => {
-      uni.hideLoading();
-      console.info("订单创建响应:", res);
-      console.info("响应数据:", res.statusCode);
-      if (res.statusCode === 200) {
-        // 拿到 orderId，跳转去支付
-        const orderId = res.data.orderId;
+  try {
+    const res: any = await apiCreateOrder(postData);
+    const orderId = res?.orderId;
+    if (!orderId) {
+      throw new Error("下单失败");
+    }
 
-        // 订单创建成功，马上发起支付
-        await handlePay(orderId);
-      } else {
-        uni.hideLoading();
-        uni.showToast({ title: res.data.message || "下单失败", icon: "none" });
-      }
-    },
-    fail: () => {
-      uni.hideLoading();
-      uni.showToast({ title: "网络错误", icon: "none" });
-    },
-  });
-};
-
-const handlePay = (orderId: number) => {
-  console.info("准备发起支付，订单ID:", orderId);
-  uni.hideLoading();
-
-  uni.showModal({
-    title: "支付确认",
-    content: `模拟微信支付：支付订单 ${orderId}？`,
-    confirmText: "确认支付",
-    cancelText: "稍后支付", // 文案改成“稍后支付”更友好
-    success: (res) => {
-      if (res.confirm) {
-        // 用户点击支付 -> 调用后端
-        confirmPayBackend(orderId);
-      } else {
-        // 🔥 核心修改：用户点击取消 -> 直接跳转详情页
-        // 此时订单状态本身就是 0 (待支付)，无需额外接口调用
-        uni.redirectTo({
-          url: `/pages/order/detail?id=${orderId}`,
-        });
-      }
-    },
-  });
-};
-// 调用后端“支付成功”接口
-const confirmPayBackend = (orderId: number) => {
-  uni.showLoading({ title: "支付中..." });
-
-  uni.request({
-    url: `${baseUrl}/api/order/${orderId}/pay`, // 刚刚写的后端接口
-    method: "POST",
-    success: (res: any) => {
-      uni.hideLoading();
-      if (res.statusCode === 200) {
-        uni.showToast({ title: "支付成功" });
-        // 支付成功 -> 跳转详情页（状态会自动变为待发货）
-        setTimeout(() => {
-          redirectToDetail(orderId);
-        }, 1000);
-      } else {
-        uni.showToast({ title: "支付失败", icon: "none" });
+    await payOrder({
+      orderId,
+      onCancel: () => {
         redirectToDetail(orderId);
-      }
-    },
-  });
+      },
+      onPaid: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        redirectToDetail(orderId);
+      },
+    });
+  } catch (e: any) {
+    uni.showToast({ title: e?.message || "下单失败", icon: "none" });
+  } finally {
+    uni.hideLoading();
+  }
 };
 
 // 统一跳转函数
@@ -464,7 +406,7 @@ const redirectToDetail = (orderId: number) => {
 const getImageUrl = (path: string | undefined) => {
   if (!path) return "/static/logo.png";
   if (path.startsWith("http") || path.startsWith("/static")) return path;
-  return baseUrl + path;
+  return API_BASE_URL + path;
 };
 </script>
 
@@ -938,3 +880,4 @@ const getImageUrl = (path: string | undefined) => {
   margin-top: 30rpx;
 }
 </style>
+

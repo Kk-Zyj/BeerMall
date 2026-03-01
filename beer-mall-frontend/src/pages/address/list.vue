@@ -34,26 +34,26 @@
 import { ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { onLoad } from "@dcloudio/uni-app";
-import { useUserStore } from "@/store/user";
+import { apiAddressList } from "@/api/address";
+import { useAuthStore } from "@/store/auth";
 
-const userStore = useUserStore();
+const userStore = useAuthStore();
 const list = ref<any[]>([]);
-const baseUrl = "https://localhost:7252";
 
 // 每次进入页面刷新数据
 onShow(() => {
   loadList();
 });
 
-const loadList = () => {
+const loadList = async () => {
   // 假设 userId = 1
   console.info("Loading address list for user ID:", userStore.userInfo.id);
-  uni.request({
-    url: `${baseUrl}/api/address?userId=${userStore.userInfo.id}`,
-    success: (res: any) => {
-      list.value = res.data;
-    },
-  });
+  try {
+    const res = await apiAddressList(userStore.userInfo.id);
+    list.value = res;
+  } catch (e) {
+    console.error("加载地址失败", e);
+  }
 };
 
 const goToEdit = (id: number) => {

@@ -74,13 +74,13 @@
 <script setup lang="ts">
 import { onShow } from "@dcloudio/uni-app";
 import { useCartStore } from "@/store/cart";
+import { API_BASE_URL } from "@/config/api";
 
 const cartStore = useCartStore();
-const baseUrl = "https://localhost:7252";
 
 // 每次进入页面，从数据库拉取最新数据
 onShow(() => {
-  cartStore.fetchCart();
+  cartStore.refresh();
 });
 
 // --- 事件处理 ---
@@ -96,7 +96,11 @@ const goToMenu = () => {
 // 2. 加减数量 (直接调用 Store，Store 会调用 API)
 const updateQuantity = (item: any, change: number) => {
   // 构造 store 需要的参数格式
-  cartStore.addToCart({ id: item.productId }, { id: item.skuId }, change);
+  cartStore.addToCart({
+    productId: item.productId,
+    skuId: item.skuId,
+    quantity: change,
+  });
 };
 
 // 3. 清空购物车
@@ -106,7 +110,7 @@ const handleClear = () => {
     content: "确定要清空购物车吗？",
     success: (res) => {
       if (res.confirm) {
-        cartStore.clearCart();
+        cartStore.clear();
       }
     },
   });
@@ -124,7 +128,7 @@ const getImageUrl = (path: string | undefined) => {
   if (!path) return "";
   if (path.startsWith("http")) return path;
   if (path.startsWith("/static")) return path;
-  return baseUrl + path;
+  return API_BASE_URL + path;
 };
 </script>
 

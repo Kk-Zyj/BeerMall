@@ -79,10 +79,15 @@
 import { ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import { smartParse } from "@/utils/addressParse";
-import { useUserStore } from "@/store/user";
-const userStore = useUserStore();
+import { useAuthStore } from "@/store/auth";
+import { request } from "@/api/request";
+import {
+  apiAddressCreate,
+  apiAddressDelete,
+  apiAddressDetail,
+} from "@/api/address";
+const userStore = useAuthStore();
 
-const baseUrl = "https://localhost:7252";
 const pasteText = ref("");
 const form = ref({
   id: 0,
@@ -108,15 +113,7 @@ const handleParse = async () => {
     // 🔥 1. 获取数据 (如果缓存没数据，就去后端拉)
     if (!cachedPcaData) {
       // 注意：这里 url 是你后端的静态资源地址
-      const res = await uni.request({
-        url: "https://localhost:7252/pca-code.json",
-        method: "GET",
-      });
-
-      if (res.statusCode !== 200) {
-        throw new Error("省市区数据加载失败");
-      }
-      cachedPcaData = res.data; // 存入缓存
+      cachedPcaData = await request<any>("/pca-code.json"); // 存入缓存
     }
 
     // 🔥 2. 开始识别 (传入下载好的数据)
@@ -142,27 +139,16 @@ const handleParse = async () => {
   }
 };
 
-const submit = () => {
-  uni.request({
-    url: `${baseUrl}/api/address`,
-    method: "POST",
-    data: form.value,
-    success: (res: any) => {
-      uni.showToast({ title: "保存成功" });
-      setTimeout(() => uni.navigateBack(), 800);
-    },
-  });
+const submit = async () => {
+  await apiAddressCreate(form.value);
+  uni.showToast({ title: "保存成功" });
+  setTimeout(() => uni.navigateBack(), 800);
 };
 
-const handleDelete = () => {
-  uni.request({
-    url: `${baseUrl}/api/address/${form.value.id}`,
-    method: "DELETE",
-    success: () => {
-      uni.showToast({ title: "已删除", icon: "none" });
-      setTimeout(() => uni.navigateBack(), 800);
-    },
-  });
+const handleDelete = async () => {
+  await apiAddressDelete(form.value.id);
+  uni.showToast({ title: "已删除", icon: "none" });
+  setTimeout(() => uni.navigateBack(), 800);
 };
 
 const onSwitchChange = (e: any) => {
@@ -172,11 +158,8 @@ const onSwitchChange = (e: any) => {
 // 加载已有数据
 onLoad((options) => {
   if (options && options.id && options.id != "0") {
-    uni.request({
-      url: `${baseUrl}/api/address/${options.id}`,
-      success: (res: any) => {
-        form.value = res.data;
-      },
+    apiAddressDetail(Number(options.id)).then((res) => {
+      form.value = res;
     });
   }
 });

@@ -83,10 +83,13 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
-import { useUserStore } from "@/store/user";
+import { useAuthStore } from "@/store/auth";
+import { useOrderPay } from "@/composables/useOrderPay";
+import { apiOrderList } from "@/api/order";
+import { API_BASE_URL } from "@/config/api";
 
-const userStore = useUserStore();
-const baseUrl = "https://localhost:7252";
+const userStore = useAuthStore();
+const { payOrder: runOrderPay } = useOrderPay();
 
 const tabs = ["全部", "待付款", "待发货", "待收货"];
 const currentTab = ref(0);
@@ -100,8 +103,8 @@ onLoad((options) => {
   }
 });
 
-onShow(() => {
-  if (userStore.checkAuth()) {
+onShow(async () => {
+  if (await userStore.checkAuth()) {
     loadData();
   }
 });
@@ -111,22 +114,20 @@ const switchTab = (index: number) => {
   loadData();
 };
 
-const loadData = () => {
+const loadData = async () => {
   loading.value = true;
-  orderList.value = []; // 先清空，防止闪烁
+  orderList.value = []; // 鍏堟竻绌猴紝闃叉闂儊
 
-  uni.request({
-    // 这里的 currentTab 正好对应后端接口的 type 参数
-    url: `${baseUrl}/api/order/list?userId=${userStore.userInfo.id}&type=${currentTab.value}`,
-    success: (res: any) => {
-      if (res.statusCode === 200) {
-        orderList.value = res.data;
-      }
-    },
-    complete: () => {
-      loading.value = false;
-    },
-  });
+  try {
+    orderList.value = await apiOrderList(
+      userStore.userInfo.id,
+      currentTab.value
+    );
+  } catch (e: any) {
+    uni.showToast({ title: e?.message || "加载订单失败", icon: "none" });
+  } finally {
+    loading.value = false;
+  }
 };
 
 // 跳转详情
@@ -136,8 +137,16 @@ const goToDetail = (id: number) => {
 
 // 支付 (复用之前的逻辑)
 const payOrder = (order: any) => {
-  // 这里简写，实际应该调用之前的 handlePay 逻辑或者跳去详情页支付
-  uni.navigateTo({ url: `/pages/order/detail?id=${order.id}` });
+  return runOrderPay({
+    orderId: order.id,
+    orderNo: order.orderNo,
+    onCancel: () => {
+      uni.navigateTo({ url: `/pages/order/detail?id=${order.id}` });
+    },
+    onPaid: () => {
+      loadData();
+    },
+  });
 };
 
 const cancelOrder = (order: any) => {
@@ -172,7 +181,7 @@ const getTotalCount = (items: any[]) =>
 const getImageUrl = (path: string | undefined) => {
   if (!path) return "/static/logo.png";
   if (path.startsWith("http") || path.startsWith("/static")) return path;
-  return baseUrl + path;
+  return API_BASE_URL + path;
 };
 
 const loadMore = () => {
@@ -330,3 +339,4 @@ const loadMore = () => {
   font-size: 28rpx;
 }
 </style>
+

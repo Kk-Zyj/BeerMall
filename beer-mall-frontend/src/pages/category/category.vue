@@ -104,10 +104,10 @@
 
             <view class="action-box">
               <view class="btn minus"
-                    @click="cartStore.addToCart({id: item.productId}, {id: item.skuId}, -1)">-</view>
+                    @click="cartStore.addToCart({ productId: item.productId, skuId: item.skuId, quantity: -1 })">-</view>
               <text class="num">{{ item.quantity }}</text>
               <view class="btn plus"
-                    @click="cartStore.addToCart({id: item.productId}, {id: item.skuId}, 1)">+</view>
+                    @click="cartStore.addToCart({ productId: item.productId, skuId: item.skuId, quantity: 1 })">+</view>
             </view>
           </view>
         </scroll-view>
@@ -218,11 +218,14 @@
 import { ref, computed, onMounted, nextTick } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { useCartStore } from "@/store/cart";
-import { useUserStore } from "@/store/user";
+import { useAuthStore } from "@/store/auth";
+import { apiCategoryList } from "@/api/category";
+import { apiProductList, apiProductDetail } from "@/api/product";
+import { apiActiveCoupons, apiReceiveCoupon } from "@/api/coupon";
+import { API_BASE_URL } from "@/config/api";
 import type { Product, Category } from "@/types/product"; // 确保路径正确
 
-const baseUrl = "https://localhost:7252";
-const userStore = useUserStore();
+const userStore = useAuthStore();
 const cartStore = useCartStore();
 
 const currentCategoryId = ref(1);
@@ -240,35 +243,34 @@ const couponList = ref<any[]>([]);
 const showCouponModal = ref(false);
 
 // --- 加载数据 ---
-const loadCategories = () => {
-  uni.request({
-    url: `${baseUrl}/api/category/list`,
-    success: (res: any) => {
-      if (res.statusCode === 200) {
-        categories.value = res.data;
-        if (categories.value.length > 0)
-          currentCategoryId.value = categories.value[0].id;
-      }
-    },
-  });
+const loadCategories = async () => {
+  try {
+    const res = await apiCategoryList();
+    categories.value = res;
+    if (categories.value.length > 0) {
+      currentCategoryId.value = categories.value[0].id;
+    }
+  } catch (e) {
+    console.error("加载分类失败", e);
+  }
 };
 
-const loadProductList = () => {
-  uni.request({
-    url: `${baseUrl}/api/product/list`,
-    success: (res: any) => {
-      if (res.statusCode === 200) allProducts.value = res.data;
-    },
-  });
+const loadProductList = async () => {
+  try {
+    const res = await apiProductList();
+    allProducts.value = res;
+  } catch (e) {
+    console.error("加载商品列表失败", e);
+  }
 };
 
-const loadCoupons = () => {
-  uni.request({
-    url: `${baseUrl}/api/app/coupon/active`,
-    success: (res: any) => {
-      if (res.statusCode === 200) couponList.value = res.data;
-    },
-  });
+const loadCoupons = async () => {
+  try {
+    const res = await apiActiveCoupons();
+    couponList.value = res;
+  } catch (e) {
+    console.error("加载优惠券失败", e);
+  }
 };
 
 // --- 计算属性 ---
@@ -289,19 +291,18 @@ const switchCategory = (id: number) => {
   currentCategoryId.value = id;
 };
 
-const openSkuModal = (item: Product) => {
+const openSkuModal = async (item: Product) => {
   uni.showLoading({ title: "加载详情..." });
-  uni.request({
-    url: `${baseUrl}/api/product/${item.id}`,
-    success: (res: any) => {
-      uni.hideLoading();
-      if (res.statusCode === 200) {
-        selectedProduct.value = res.data;
-        quantity.value = 1;
-        showModal.value = true;
-      }
-    },
-  });
+  try {
+    const res = await apiProductDetail(item.id);
+    selectedProduct.value = res;
+    quantity.value = 1;
+    showModal.value = true;
+  } catch (e) {
+    console.error("加载规格详情失败", e);
+  } finally {
+    uni.hideLoading();
+  }
 };
 
 const closeModal = () => {
@@ -312,7 +313,11 @@ const confirmAddToCart = () => {
   if (!selectedProduct.value) return;
   // TODO: 如果有多规格，需要获取选中的 skuId。这里先假定默认规格
   const defaultSku = selectedProduct.value.skus[0];
-  cartStore.addToCart(selectedProduct.value, defaultSku, quantity.value);
+  cartStore.addToCart({
+    productId: selectedProduct.value.id,
+    skuId: defaultSku.id,
+    quantity: quantity.value,
+  });
   uni.showToast({ title: `已加购 ${quantity.value} 份`, icon: "success" });
   closeModal();
 };
@@ -321,7 +326,12 @@ const addToCart = (goods: Product) => {
   const skuId = goods.defaultSkuId;
   if (skuId === 0)
     return uni.showToast({ title: "暂无规格数据", icon: "none" });
-  cartStore.addToCart(goods, { id: skuId }, 1);
+
+  cartStore.addToCart({
+    productId: goods.id,
+    skuId,
+    quantity: 1,
+  });
 };
 
 const clearCart = () => {
@@ -330,7 +340,7 @@ const clearCart = () => {
     content: "确定清空购物车吗？",
     success: (res) => {
       if (res.confirm) {
-        cartStore.clearCart();
+        cartStore.clear();
         showCartDetail.value = false;
       }
     },
@@ -348,7 +358,7 @@ const goToCheckout = () => {
 const getImageUrl = (path: string | undefined) => {
   if (!path) return "/static/logo.png";
   if (path.startsWith("http") || path.startsWith("/static")) return path;
-  return baseUrl + path;
+  return API_BASE_URL + path;
 };
 
 // --- 优惠券逻辑 ---//
@@ -362,21 +372,17 @@ const openCouponPopup = () => {
   }, 150);
 };
 
-const receiveCoupon = (couponId: number) => {
-  if (!userStore.checkAuth()) return;
+const receiveCoupon = async (couponId: number) => {
+  if (!(await userStore.checkAuth())) return;
   uni.showLoading({ title: "领取中..." });
-  uni.request({
-    url: `${baseUrl}/api/app/coupon/${couponId}/receive?userId=${userStore.userInfo.id}`,
-    method: "POST",
-    success: (res: any) => {
-      uni.hideLoading();
-      if (res.statusCode === 200) {
-        uni.showToast({ title: "领取成功", icon: "success" });
-      } else {
-        uni.showToast({ title: res.data || "领取失败", icon: "none" });
-      }
-    },
-  });
+  try {
+    await apiReceiveCoupon(couponId, userStore.userInfo.id);
+    uni.showToast({ title: "领取成功", icon: "success" });
+  } catch (e: any) {
+    uni.showToast({ title: e?.message || "领取失败", icon: "none" });
+  } finally {
+    uni.hideLoading();
+  }
 };
 
 onLoad(() => {
@@ -385,7 +391,7 @@ onLoad(() => {
 });
 
 onShow(() => {
-  cartStore.fetchCart();
+  cartStore.refresh();
   loadCoupons(); // 每次显示页面刷新优惠券列表
 });
 </script>

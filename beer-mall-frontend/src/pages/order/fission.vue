@@ -15,9 +15,9 @@
 
 <script setup lang="ts">
 import { onShareAppMessage } from "@dcloudio/uni-app";
-import { useUserStore } from "@/store/user";
+import { useAuthStore } from "@/store/auth";
 
-const userStore = useUserStore();
+const userStore = useAuthStore();
 
 // 🔥 核心：监听用户点击分享按钮
 onShareAppMessage(() => {

@@ -19,9 +19,9 @@
 </template>
 
 <script setup lang="ts">
-import { useUserStore } from "@/store/user";
+import { useAuthStore } from "@/store/auth";
 
-const userStore = useUserStore();
+const userStore = useAuthStore();
 
 const close = () => {
   userStore.showLoginPopup = false;
