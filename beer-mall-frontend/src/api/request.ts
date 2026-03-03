@@ -3,18 +3,27 @@ import { API_BASE_URL } from '@/config/api'
 
 type UniRequestMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
 
-export interface ApiResult<T> {
+export interface ApiEnvelope<T> {
+  code: number
+  message: string
   data: T
-  statusCode: number
-  header: any
+  traceId?: string
 }
 
 export class ApiError extends Error {
+  code?: number
   statusCode?: number
-  constructor(message: string, statusCode?: number) {
+  traceId?: string
+
+  constructor(
+    message: string,
+    opts?: { code?: number; statusCode?: number; traceId?: string },
+  ) {
     super(message)
     this.name = 'ApiError'
-    this.statusCode = statusCode
+    this.code = opts?.code
+    this.statusCode = opts?.statusCode
+    this.traceId = opts?.traceId
   }
 }
 
@@ -26,6 +35,31 @@ function joinUrl(base: string, path: string) {
   return base + path
 }
 
+function isPlainObject(v: any): v is Record<string, any> {
+  return (
+    v !== null &&
+    typeof v === 'object' &&
+    Object.prototype.toString.call(v) === '[object Object]'
+  )
+}
+
+function hasOwn(obj: any, key: string) {
+  return Object.prototype.hasOwnProperty.call(obj, key)
+}
+
+function showError(msg: string, silent?: boolean) {
+  if (silent) return
+  try {
+    uni.showToast({ title: msg, icon: 'none' })
+  } catch {
+    // 防止极端情况下 toast 也引起异常
+  }
+}
+
+/**
+ * request<T>：返回后端 ApiResponse 的 data（即 T）
+ * - code != 0：抛 ApiError
+ */
 export function request<T>(
   path: string,
   options?: {
@@ -33,6 +67,7 @@ export function request<T>(
     data?: any
     headers?: Record<string, string>
     timeout?: number
+    silent?: boolean
   },
 ): Promise<T> {
   const url = joinUrl(API_BASE_URL, path)
@@ -48,26 +83,53 @@ export function request<T>(
         ...(options?.headers ?? {}),
       },
       timeout: options?.timeout ?? 15000,
-      success: (res) => {
-        // 1) HTTP 层失败
+      success: (res: any) => {
+        // HTTP 层
         if (!res || typeof res.statusCode !== 'number') {
-          reject(new ApiError('网络异常：无响应'))
+          const err = new ApiError('网络异常：无响应')
+          showError(err.message, options?.silent)
+          reject(err)
           return
         }
         if (res.statusCode < 200 || res.statusCode >= 300) {
           const msg =
-            (res.data as any)?.message ||
-            (res.data as any)?.error ||
+            (isPlainObject(res.data) && (res.data.message || res.data.error)) ||
             `请求失败（HTTP ${res.statusCode}）`
-          reject(new ApiError(msg, res.statusCode))
+          const err = new ApiError(String(msg), { statusCode: res.statusCode })
+          showError(err.message, options?.silent)
+          reject(err)
           return
         }
 
-        // 2) 业务层：如果你的后端未来统一成 {code,message,data}，这里可集中处理
-        resolve(res.data as T)
+        // 业务层：只在 res.data 是普通对象时才尝试解包
+        const body = res.data
+        if (
+          isPlainObject(body) &&
+          hasOwn(body, 'code') &&
+          hasOwn(body, 'data')
+        ) {
+          const env = body as ApiEnvelope<T>
+          if (typeof env.code === 'number' && env.code !== 0) {
+            const err = new ApiError(env.message || '请求失败', {
+              code: env.code,
+              statusCode: res.statusCode,
+              traceId: env.traceId,
+            })
+            showError(err.message, options?.silent)
+            reject(err)
+            return
+          }
+          resolve(env.data as T)
+          return
+        }
+
+        // 兼容：如果某些接口没包 ApiResponse（理论上不该发生）
+        resolve(body as T)
       },
-      fail: (err) => {
-        reject(new ApiError(err?.errMsg || '网络请求失败'))
+      fail: (err: any) => {
+        const e = new ApiError(err?.errMsg || '网络请求失败')
+        showError(e.message, options?.silent)
+        reject(e)
       },
     })
   })

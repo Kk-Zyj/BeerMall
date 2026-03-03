@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("BeerWallWeb")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0f6e8fc6d844bedde6d227c6b4a0f1c31742b1d7")]
 [assembly: System.Reflection.AssemblyProductAttribute("BeerWallWeb")]
 [assembly: System.Reflection.AssemblyTitleAttribute("BeerWallWeb")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

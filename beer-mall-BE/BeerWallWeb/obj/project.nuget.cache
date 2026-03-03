@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "CycU1qDQHHI=",
+  "dgSpecHash": "hPKrikEUgQA=",
   "success": true,
-  "projectFilePath": "D:\\BeerWall\\WorkSpace\\BeerMall\\BeerWallWeb\\BeerWallWeb.csproj",
+  "projectFilePath": "D:\\BeerWall\\WorkSpace\\BeerMall\\beer-mall-BE\\BeerWallWeb\\BeerWallWeb.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\Administrator\\.nuget\\packages\\bouncycastle.cryptography\\2.6.2\\bouncycastle.cryptography.2.6.2.nupkg.sha512",
     "C:\\Users\\Administrator\\.nuget\\packages\\flurl\\4.0.0\\flurl.4.0.0.nupkg.sha512",

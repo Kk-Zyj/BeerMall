@@ -199,7 +199,8 @@ import { onLoad } from "@dcloudio/uni-app";
 import { useAuthStore } from "@/store/auth";
 import { onShareAppMessage } from "@dcloudio/uni-app";
 import uniPopup from "@dcloudio/uni-ui/lib/uni-popup/uni-popup.vue";
-import { apiOrderDetail, apiOrderPay, apiOrderCancel } from "@/api/order";
+import { apiOrderDetail, apiOrderCancel } from "@/api/order";
+import { useOrderPay } from "@/composables/useOrderPay";
 import { API_BASE_URL } from "@/config/api";
 
 const task = ref<any>(null); // 裂变数据
@@ -216,6 +217,8 @@ const taskTimeStr = ref(""); // 格式化字符串 (dd天hh小时)
 let taskTimer: any = null;
 
 const userStore = useAuthStore();
+const { payOrder: runOrderPay } = useOrderPay();
+
 const order = ref<any>(null);
 const countdown = ref(0); // 剩余秒数
 const countdownStr = ref(""); // 格式化后的字符串 (mm:ss)
@@ -389,25 +392,22 @@ onShareAppMessage((res) => {
   return shareConfig;
 });
 
-// 支付 (暂时只是弹窗，后续接微信支付)
-const payOrder = () => {
-  // 复用模拟支付逻辑
-  uni.showModal({
-    title: "支付确认",
-    content: "确认支付当前订单？",
-    success: (res) => {
-      if (res.confirm) {
-        uni.showLoading({ title: "支付中" });
-        apiOrderPay(order.value.id).then(() => {
-          uni.hideLoading();
-          uni.showToast({ title: "支付成功" });
-          // 🔥 支付成功后，重新加载当前页面详情，刷新状态
-          loadOrderDetail(String(order.value.id));
-        }).catch((e: any) => {
-          uni.hideLoading();
-          uni.showToast({ title: e?.message || "支付失败", icon: "none" });
-        });
-      }
+// 支付（微信真支付）
+const payOrder = async () => {
+  // 未登录/未绑手机号则弹授权（支付必须手机号）
+  if (!(await userStore.checkAuth(true))) return;
+
+  await runOrderPay({
+    orderId: order.value.id,
+    orderNo: order.value.orderNo,
+    onCancel: async () => {
+      // 取消支付：保持在详情页即可
+      await loadOrderDetail(String(order.value.id));
+    },
+    onPaid: async () => {
+      // 微信支付成功后，服务端 notify 可能稍有延迟
+      await new Promise((r) => setTimeout(r, 1200));
+      await loadOrderDetail(String(order.value.id));
     },
   });
 };

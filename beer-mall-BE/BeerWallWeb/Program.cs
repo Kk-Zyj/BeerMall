@@ -1,6 +1,9 @@
 using BeerMall.Api.Data;
 using BeerMall.Api.Services;
+using BeerWallWeb.Filters;
+using BeerWallWeb.Middleware;
 using BeerWallWeb.Services;
+using BeerWallWeb.WxPay;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,7 +27,10 @@ builder.Services.AddCors(options =>
 });
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    options.Filters.Add<ApiResponseFilter>();
+});
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -51,7 +57,18 @@ builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddHostedService<OrderTimeoutService>();
 
 // 处理拼团失败
-builder.Services.AddHostedService<GroupBuyExpirationService>(); 
+builder.Services.AddHostedService<GroupBuyExpirationService>();
+
+//防超卖
+builder.Services.AddScoped<InventoryAtomicService>();
+
+//微信支付 
+builder.Services.Configure<WxPayOptions>(builder.Configuration.GetSection("WxPay"));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<WxPayOptions>>().Value);
+
+builder.Services.AddSingleton<WxPayHttpSigner>();
+builder.Services.AddSingleton<WxPayPlatformCertStore>();
+builder.Services.AddScoped<WxPayService>();
 
 var app = builder.Build();
 
@@ -66,6 +83,9 @@ if (app.Environment.IsDevelopment())
 app.UseCors("AllowAll");
 
 app.UseHttpsRedirection();
+
+//全局异常
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 // 开启静态文件中间件
 app.UseStaticFiles();

@@ -635,6 +635,32 @@
     "ReturnTypes": []
   },
   {
+    "ContainingType": "BeerMall.Api.Controllers.WxPayController",
+    "Method": "Notify",
+    "RelativePath": "api/WxPay/notify",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "BeerMall.Api.Controllers.WxPayController",
+    "Method": "Prepay",
+    "RelativePath": "api/WxPay/prepay",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "req",
+        "Type": "BeerWallWeb.WxPay.PrepayRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
     "ContainingType": "BeerWallWeb.Controllers.WeatherForecastController",
     "Method": "Get",
     "RelativePath": "WeatherForecast",

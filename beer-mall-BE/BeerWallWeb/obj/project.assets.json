@@ -4293,11 +4293,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "D:\\BeerWall\\WorkSpace\\BeerMall\\BeerWallWeb\\BeerWallWeb.csproj",
+      "projectUniqueName": "D:\\BeerWall\\WorkSpace\\BeerMall\\beer-mall-BE\\BeerWallWeb\\BeerWallWeb.csproj",
       "projectName": "BeerWallWeb",
-      "projectPath": "D:\\BeerWall\\WorkSpace\\BeerMall\\BeerWallWeb\\BeerWallWeb.csproj",
+      "projectPath": "D:\\BeerWall\\WorkSpace\\BeerMall\\beer-mall-BE\\BeerWallWeb\\BeerWallWeb.csproj",
       "packagesPath": "C:\\Users\\Administrator\\.nuget\\packages\\",
-      "outputPath": "D:\\BeerWall\\WorkSpace\\BeerMall\\BeerWallWeb\\obj\\",
+      "outputPath": "D:\\BeerWall\\WorkSpace\\BeerMall\\beer-mall-BE\\BeerWallWeb\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "D:\\Software\\Visual Studio SDK\\NuGetPackages"

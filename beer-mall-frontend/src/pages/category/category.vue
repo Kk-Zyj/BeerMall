@@ -223,7 +223,8 @@ import { apiCategoryList } from "@/api/category";
 import { apiProductList, apiProductDetail } from "@/api/product";
 import { apiActiveCoupons, apiReceiveCoupon } from "@/api/coupon";
 import { API_BASE_URL } from "@/config/api";
-import type { Product, Category } from "@/types/product"; // 确保路径正确
+import type { Product } from "@/types/product";
+import type { Category } from "@/types/category";
 
 const userStore = useAuthStore();
 const cartStore = useCartStore();

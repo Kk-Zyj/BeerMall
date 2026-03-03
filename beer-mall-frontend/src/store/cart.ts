@@ -34,6 +34,8 @@ export const useCartStore = defineStore('cart', () => {
   async function refresh() {
     const userId = await _ensureUserId()
     const res = await apiGetCart(userId)
+    console.log(res.items)
+
     cartList.value = res?.items ?? []
   }
 
