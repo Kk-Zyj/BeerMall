@@ -6,9 +6,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using System.Net.Http;
 using static SKIT.FlurlHttpClient.Wechat.Api.Models.ProductSPUGetListResponse.Types;
+using Microsoft.AspNetCore.Authorization;
 
 namespace BeerWallWeb.Controllers.AdminController
 {
+    [Authorize(Roles = "Admin")]
     [Route("api/[controller]")]
     [ApiController]
     public class AdminController : ControllerBase
@@ -19,6 +21,7 @@ namespace BeerWallWeb.Controllers.AdminController
             _context = context;
         }
 
+        [AllowAnonymous]
         [HttpGet("{productId}")]
         public async Task<ActionResult<RuleDto>> GetRule(long productId)
         {

@@ -1,11 +1,13 @@
-﻿using BeerMall.Api.Data;
+﻿using System.Text;
+using System.Text.Json;
+using BeerMall.Api.Data;
 using BeerMall.Api.Entities;
+using BeerWallWeb.Extensions;
 using BeerWallWeb.Models;
 using BeerWallWeb.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Text;
-using System.Text.Json;
 
 [Route("api/[controller]")]
 [ApiController]
@@ -15,17 +17,20 @@ public class AuthController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly WeChatService _weChatService;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly JwtTokenService _jwtTokenService;
 
     public AuthController(
         BeerMallContext context,
         IConfiguration configuration,
         WeChatService weChatService,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        JwtTokenService jwtTokenService)
     {
         _context = context;
         _configuration = configuration;
         _weChatService = weChatService;
         _httpClientFactory = httpClientFactory;
+        _jwtTokenService = jwtTokenService;
     }
 
     // Auth 错误码（42xxx）
@@ -40,13 +45,11 @@ public class AuthController : ControllerBase
     {
         Ensure(!string.IsNullOrWhiteSpace(dto?.Code), "code不能为空", CODE_INVALID_WX_CODE);
 
-        // 配置缺失 -> 业务错误（避免直接 InvalidOperationException）
         string? appId = _configuration["AppID"];
         string? secret = _configuration["AppSecret"];
         Ensure(!string.IsNullOrWhiteSpace(appId), "AppID 配置缺失", CODE_CONFIG_MISSING, 500);
         Ensure(!string.IsNullOrWhiteSpace(secret), "AppSecret 配置缺失", CODE_CONFIG_MISSING, 500);
 
-        // 1) 调用微信 API：code -> openid
         string url =
             $"https://api.weixin.qq.com/sns/jscode2session?appid={appId}&secret={secret}&js_code={dto.Code}&grant_type=authorization_code";
 
@@ -73,7 +76,6 @@ public class AuthController : ControllerBase
 
         Ensure(!string.IsNullOrWhiteSpace(wxData?.openid), "微信登录失败", CODE_INVALID_WX_CODE);
 
-        // 2) 查库/注册影子用户
         try
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.OpenId == wxData!.openid);
@@ -84,14 +86,28 @@ public class AuthController : ControllerBase
                 await _context.SaveChangesAsync();
             }
 
-            // 3) 返回用户信息
+            var token = _jwtTokenService.CreateToken(user);
+
             return Ok(new
             {
+                token,
+
+                // 兼容旧前端字段
                 userId = user.Id,
                 nickName = user.NickName,
                 avatarUrl = user.AvatarUrl,
                 mobile = user.Mobile,
-                isMobileVerified = !string.IsNullOrWhiteSpace(user.Mobile)
+                isMobileVerified = !string.IsNullOrWhiteSpace(user.Mobile),
+
+                // 新结构
+                user = new
+                {
+                    id = user.Id,
+                    nickName = user.NickName,
+                    avatarUrl = user.AvatarUrl,
+                    mobile = user.Mobile,
+                    isMobileVerified = !string.IsNullOrWhiteSpace(user.Mobile)
+                }
             });
         }
         catch
@@ -101,19 +117,19 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// 绑定手机号 (需要 access_token)
+    /// 绑定手机号（从 JWT 中识别当前用户）
     /// </summary>
+    [Authorize]
     [HttpPost("bind-mobile")]
     public async Task<ActionResult> BindMobile([FromBody] BindMobileDto dto)
     {
-        Ensure(dto.UserId > 0, "userId无效", CODE_USER_NOT_FOUND);
+        var userId = User.GetUserId();
+        Ensure(userId > 0, "登录状态无效", CODE_USER_NOT_FOUND, 401);
         Ensure(!string.IsNullOrWhiteSpace(dto.Code), "code不能为空", CODE_BIND_MOBILE_FAILED);
 
-        // 1) 用户必须存在
-        var user = await _context.Users.FindAsync(dto.UserId);
+        var user = await _context.Users.FindAsync(userId);
         Ensure(user != null, "用户不存在", CODE_USER_NOT_FOUND, 404);
 
-        // 2) 获取 access_token（service 内部处理缓存）
         string accessToken;
         try
         {
@@ -124,7 +140,6 @@ public class AuthController : ControllerBase
             throw new BusinessException("绑定失败：获取微信 access_token 失败", CODE_BIND_MOBILE_FAILED);
         }
 
-        // 3) 用 Token + code 换手机号
         string url = $"https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token={accessToken}";
 
         var client = _httpClientFactory.CreateClient();
@@ -161,11 +176,22 @@ public class AuthController : ControllerBase
         var mobile = wxRes.phone_info?.phoneNumber;
         Ensure(!string.IsNullOrWhiteSpace(mobile), "绑定失败：手机号为空", CODE_BIND_MOBILE_FAILED);
 
-        // 4) 写库
         user!.Mobile = mobile!;
         await _context.SaveChangesAsync();
 
-        return Ok(new { success = true, mobile });
+        return Ok(new
+        {
+            success = true,
+            mobile,
+            user = new
+            {
+                id = user.Id,
+                nickName = user.NickName,
+                avatarUrl = user.AvatarUrl,
+                mobile = user.Mobile,
+                isMobileVerified = true
+            }
+        });
     }
 
     private static void Ensure(bool condition, string message, int code, int httpStatus = 400)
@@ -174,21 +200,30 @@ public class AuthController : ControllerBase
     }
 }
 
-public class LoginDto { public string Code { get; set; } }
-public class WxAuthResponse { public string openid { get; set; } public string session_key { get; set; } }
-
-// DTO 类
-public class BindMobileDto
+public class LoginDto
 {
-    public long UserId { get; set; }
-    public string Code { get; set; } // 手机号授权的 code
+    public string Code { get; set; } = "";
 }
 
-// 微信返回结构辅助类
+public class WxAuthResponse
+{
+    public string openid { get; set; } = "";
+    public string session_key { get; set; } = "";
+}
+
+public class BindMobileDto
+{
+    public string Code { get; set; } = "";
+}
+
 public class WxPhoneResponse
 {
     public int errcode { get; set; }
-    public string errmsg { get; set; }
-    public PhoneInfo phone_info { get; set; }
+    public string errmsg { get; set; } = "";
+    public PhoneInfo? phone_info { get; set; }
 }
-public class PhoneInfo { public string phoneNumber { get; set; } }
+
+public class PhoneInfo
+{
+    public string phoneNumber { get; set; } = "";
+}

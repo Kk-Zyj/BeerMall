@@ -109,6 +109,7 @@
                       required>
           <el-upload class="avatar-uploader"
                      :action="uploadUrl"
+                     :headers="uploadHeaders"
                      :show-file-list="false"
                      :on-success="handleUploadSuccess"
                      :before-upload="beforeUpload">
@@ -204,13 +205,15 @@ import request from '@/utils/request'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue' // 确保引了图标
 
-// 后端 API 基础地址 (用于图片回显拼接)
-const baseApiUrl = 'https://localhost:7252';
+const baseApiUrl = (import.meta.env.VITE_API_ORIGIN || 'https://localhost:7252').replace(/\/$/, '');
 
 // 上传接口地址
 const uploadUrl = `${baseApiUrl}/api/upload/image`;
 
-// 上传成功的回调
+const uploadHeaders = {
+  Authorization: `Bearer ${localStorage.getItem('admin_token') || ''}`
+};
+
 const handleUploadSuccess = (response, uploadFile) => {
   // 假设后端返回 { url: '/uploads/images/xxx.jpg', success: true }
   if (response.url) {

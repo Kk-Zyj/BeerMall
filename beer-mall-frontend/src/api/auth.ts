@@ -2,11 +2,19 @@
 import { request } from '@/api/request'
 
 export interface LoginResp {
+  token?: string
   userId?: number
-  id?: number
+  nickName?: string
+  avatarUrl?: string
   mobile?: string
   isMobileVerified?: boolean
-  success?: boolean
+  user?: {
+    id: number
+    nickName?: string
+    avatarUrl?: string
+    mobile?: string
+    isMobileVerified?: boolean
+  }
 }
 
 export function apiLogin(code: string) {
@@ -16,9 +24,13 @@ export function apiLogin(code: string) {
   })
 }
 
-export function apiBindMobile(payload: { userId: number; code: string }) {
-  return request<LoginResp & { mobile?: string; success?: boolean }>(
-    '/api/Auth/bind-mobile',
-    { method: 'POST', data: payload },
-  )
+export function apiBindMobile(payload: { code: string }) {
+  return request<
+    LoginResp & {
+      success?: boolean
+    }
+  >('/api/Auth/bind-mobile', {
+    method: 'POST',
+    data: payload,
+  })
 }

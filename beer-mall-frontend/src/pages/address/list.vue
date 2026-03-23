@@ -32,25 +32,23 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
-import { onShow } from "@dcloudio/uni-app";
-import { onLoad } from "@dcloudio/uni-app";
+import { onShow, onLoad } from "@dcloudio/uni-app";
 import { apiAddressList } from "@/api/address";
 import { useAuthStore } from "@/store/auth";
 
 const userStore = useAuthStore();
 const list = ref<any[]>([]);
+const isSelectionMode = ref(false);
 
-// 每次进入页面刷新数据
-onShow(() => {
+onShow(async () => {
+  if (!(await userStore.checkAuth(false))) return;
   loadList();
 });
 
 const loadList = async () => {
-  // 假设 userId = 1
-  console.info("Loading address list for user ID:", userStore.userInfo.id);
   try {
-    const res = await apiAddressList(userStore.userInfo.id);
-    list.value = res;
+    const res = await apiAddressList();
+    list.value = res || [];
   } catch (e) {
     console.error("加载地址失败", e);
   }
@@ -60,10 +58,7 @@ const goToEdit = (id: number) => {
   uni.navigateTo({ url: `/pages/address/edit?id=${id}` });
 };
 
-const isSelectionMode = ref(false); // 是否是选择模式
-
 onLoad((options) => {
-  // 检查 URL 参数，如果有 mode=select，说明是来选地址的
   if (options && options.mode === "select") {
     isSelectionMode.value = true;
   }
@@ -71,12 +66,8 @@ onLoad((options) => {
 
 const selectAddress = (item: any) => {
   if (isSelectionMode.value) {
-    // 1. 发送事件给上一页
     uni.$emit("selectAddress", item);
-    // 2. 返回
     uni.navigateBack();
-  } else {
-    // 之前的逻辑：可能是什么都不做，或者去编辑
   }
 };
 </script>

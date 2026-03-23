@@ -66,7 +66,8 @@
             <view class="btn outline"
                   v-if="order.status === 2">查看物流</view>
             <view class="btn primary"
-                  v-if="order.status === 2">确认收货</view>
+                  v-if="order.status === 2"
+                  @click.stop="confirmReceipt(order)">确认收货</view>
           </view>
         </view>
       </view>
@@ -85,7 +86,7 @@ import { ref } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { useAuthStore } from "@/store/auth";
 import { useOrderPay } from "@/composables/useOrderPay";
-import { apiOrderList } from "@/api/order";
+import { apiOrderList, apiOrderCancel, apiConfirmReceipt } from "@/api/order";
 import { API_BASE_URL } from "@/config/api";
 
 const userStore = useAuthStore();
@@ -119,10 +120,7 @@ const loadData = async () => {
   orderList.value = []; // 鍏堟竻绌猴紝闃叉闂儊
 
   try {
-    orderList.value = await apiOrderList(
-      userStore.userInfo.id,
-      currentTab.value
-    );
+    orderList.value = await apiOrderList(currentTab.value);
   } catch (e: any) {
     uni.showToast({ title: e?.message || "加载订单失败", icon: "none" });
   } finally {
@@ -157,6 +155,30 @@ const cancelOrder = (order: any) => {
         // 调用取消接口...
         uni.showToast({ title: "已取消" });
         loadData(); // 刷新列表
+      }
+    },
+  });
+};
+
+const confirmReceipt = async (order: any) => {
+  const ok = await userStore.checkAuth(false);
+  if (!ok) return;
+
+  uni.showModal({
+    title: "确认收货",
+    content: "确认已收到商品吗？确认后订单将变为已完成。",
+    success: async (res) => {
+      if (!res.confirm) return;
+
+      try {
+        await apiConfirmReceipt(order.id);
+        uni.showToast({ title: "确认收货成功", icon: "success" });
+        await loadData();
+      } catch (e: any) {
+        uni.showToast({
+          title: e?.message || "确认收货失败",
+          icon: "none",
+        });
       }
     },
   });

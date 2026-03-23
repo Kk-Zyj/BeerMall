@@ -2,9 +2,11 @@
 using BeerMall.Api.Entities;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization;
 
 namespace BeerWallWeb.Controllers.AdminController
 {
+    [Authorize(Roles = "Admin")]
     [Route("api/admin/coupon")]
     public class AdminCouponController : ControllerBase
     {

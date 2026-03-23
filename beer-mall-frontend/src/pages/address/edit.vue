@@ -86,12 +86,12 @@ import {
   apiAddressDelete,
   apiAddressDetail,
 } from "@/api/address";
+
 const userStore = useAuthStore();
 
 const pasteText = ref("");
 const form = ref({
   id: 0,
-  userId: userStore.userInfo.id, // 实际应从 UserStore 获取
   name: "",
   mobile: "",
   province: "",
@@ -101,7 +101,6 @@ const form = ref({
   isDefault: false,
 });
 
-// 定义一个全局变量缓存数据，防止每次点击都去请求
 let cachedPcaData: any = null;
 
 const handleParse = async () => {
@@ -110,24 +109,17 @@ const handleParse = async () => {
   uni.showLoading({ title: "识别中..." });
 
   try {
-    // 🔥 1. 获取数据 (如果缓存没数据，就去后端拉)
     if (!cachedPcaData) {
-      // 注意：这里 url 是你后端的静态资源地址
-      cachedPcaData = await request<any>("/pca-code.json"); // 存入缓存
+      cachedPcaData = await request<any>("/pca-code.json");
     }
 
-    // 🔥 2. 开始识别 (传入下载好的数据)
     const result = smartParse(pasteText.value, cachedPcaData);
-    // 回填表单
+
     if (result.name) form.value.name = result.name;
     if (result.mobile) form.value.mobile = result.mobile;
-
-    // 地区回填
     if (result.provinceName) form.value.province = result.provinceName;
     if (result.cityName) form.value.city = result.cityName;
     if (result.areaName) form.value.district = result.areaName;
-
-    // 详细地址回填
     if (result.detail) form.value.detail = result.detail;
 
     uni.showToast({ title: "识别完成", icon: "success" });
@@ -140,12 +132,16 @@ const handleParse = async () => {
 };
 
 const submit = async () => {
+  if (!(await userStore.checkAuth(false))) return;
+
   await apiAddressCreate(form.value);
   uni.showToast({ title: "保存成功" });
   setTimeout(() => uni.navigateBack(), 800);
 };
 
 const handleDelete = async () => {
+  if (!(await userStore.checkAuth(false))) return;
+
   await apiAddressDelete(form.value.id);
   uni.showToast({ title: "已删除", icon: "none" });
   setTimeout(() => uni.navigateBack(), 800);
@@ -155,11 +151,21 @@ const onSwitchChange = (e: any) => {
   form.value.isDefault = e.detail.value;
 };
 
-// 加载已有数据
-onLoad((options) => {
+onLoad(async (options) => {
+  if (!(await userStore.checkAuth(false))) return;
+
   if (options && options.id && options.id != "0") {
     apiAddressDetail(Number(options.id)).then((res) => {
-      form.value = res;
+      form.value = {
+        id: res.id || 0,
+        name: res.name || "",
+        mobile: res.mobile || "",
+        province: res.province || "",
+        city: res.city || "",
+        district: res.district || "",
+        detail: res.detail || "",
+        isDefault: !!res.isDefault,
+      };
     });
   }
 });
@@ -218,44 +224,43 @@ onLoad((options) => {
     .input-area {
       flex: 1;
       font-size: 28rpx;
-      min-height: 80rpx;
+      min-height: 120rpx;
     }
-
     .input-group {
       flex: 1;
       display: flex;
-      gap: 10rpx;
+      gap: 12rpx;
       .input-sm {
         flex: 1;
-        background: #f9f9f9;
-        padding: 10rpx;
-        border-radius: 8rpx;
-        font-size: 24rpx;
-        text-align: center;
+        font-size: 28rpx;
       }
     }
-
-    &.switch-item {
-      justify-content: space-between;
+    .region-text {
+      flex: 1;
+      font-size: 28rpx;
+      color: #333;
     }
-    &:last-child {
-      border-bottom: none;
-    }
+  }
+  .switch-item {
+    justify-content: space-between;
   }
 }
 
 .footer-btn {
-  margin-top: 60rpx;
+  margin-top: 40rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
   .save-btn {
     background: #000;
     color: #fff;
     border-radius: 44rpx;
-    margin-bottom: 20rpx;
   }
   .del-btn {
     background: #fff;
-    color: #ff4d4f;
+    color: #e34d59;
     border-radius: 44rpx;
+    border: 1rpx solid #f0c2c7;
   }
 }
 </style>

@@ -259,7 +259,7 @@ onLoad((options) => {
 
 const loadOrderDetail = async (id: string) => {
   try {
-    const res = await apiOrderDetail(Number(id), userStore.userInfo.id);
+    const res = await apiOrderDetail(Number(id));
     order.value = res.order || res;
     task.value = res.task || null;
     groupBuy.value = res.groupBuy || null;

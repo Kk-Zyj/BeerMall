@@ -94,7 +94,7 @@ const handleUserClick = async () => {
   // 2. 如果有手机号 -> 返回 true -> 进入下面逻辑
   if (await userStore.checkAuth()) {
     // 已是正式会员，跳转去修改个人资料(头像/昵称)
-    uni.navigateTo({ url: "/pages/my/profile" });
+    //  uni.navigateTo({ url: "/pages/my/profile" });
   }
 };
 

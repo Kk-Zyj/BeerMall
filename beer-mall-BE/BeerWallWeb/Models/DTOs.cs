@@ -42,21 +42,18 @@ namespace BeerMall.Api.Models.DTOs
         public string Icon { get; set; } // 分类图标 (可选)
         public int Sort { get; set; } = 0; // 排序权重，数字越大越靠前 
     }
-
     public class CreateOrderDto
     {
-        public long UserId { get; set; }
         public long AddressId { get; set; } // 用户选的地址ID (如果是自提，可能是0)
-        public string DeliveryMethod { get; set; } // "express", "local", "self"  //配送方式
+        public string DeliveryMethod { get; set; } // "express", "local", "self"
         public string Remark { get; set; }
         public string? ClientIp { get; set; }     // 下单时的 IP
-        public string DeviceId { get; set; }     // 设备指纹 (前端生成或获取) 
-        public int RiskStatus { get; set; } = 0;  // 风控状态: 0=正常, 1=疑似作弊(不计入裂变), 2=确认作弊
-        public string? RiskReason { get; set; }   // 作弊理由 (如: IP重复)
-        public int OrderType { get; set; } // 0=普通, 1=开团, 2=参团
-        public long? GroupBuyId { get; set; } // 如果是参团，必填
-
-        public long? UserCouponId { get; set; } // 可选的用户优惠券ID
+        public string DeviceId { get; set; }      // 设备指纹
+        public int RiskStatus { get; set; } = 0;  // 风控状态
+        public string? RiskReason { get; set; }   // 作弊理由
+        public int OrderType { get; set; }        // 0=普通, 1=开团, 2=参团
+        public long? GroupBuyId { get; set; }     // 如果是参团，必填
+        public long? UserCouponId { get; set; }   // 可选的用户优惠券ID
     }
 
     public class RuleDto

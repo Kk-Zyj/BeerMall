@@ -37,7 +37,13 @@
 
     <el-container>
       <el-header class="header">
-        <div class="breadcrumb">当前位置：{{ $route.meta.title }}</div>
+        <div class="breadcrumb">当前位置：{{ route.meta.title }}</div>
+        <div class="header-right">
+          <span class="admin-name">{{ adminName }}</span>
+          <el-button link
+                     type="danger"
+                     @click="logout">退出登录</el-button>
+        </div>
       </el-header>
       <el-main class="main">
         <router-view />
@@ -45,6 +51,32 @@
     </el-container>
   </el-container>
 </template>
+
+<script setup>
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+
+const route = useRoute()
+const router = useRouter()
+
+const adminName = computed(() => {
+  try {
+    const raw = localStorage.getItem('admin_user')
+    const user = raw ? JSON.parse(raw) : null
+    return user?.userName || 'admin'
+  } catch {
+    return 'admin'
+  }
+})
+
+const logout = () => {
+  localStorage.removeItem('admin_token')
+  localStorage.removeItem('admin_user')
+  ElMessage.success('已退出登录')
+  router.replace('/login')
+}
+</script>
 
 <style scoped>
 .layout-container {
@@ -67,7 +99,17 @@
   border-bottom: 1px solid #ddd;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 20px;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.admin-name {
+  color: #606266;
+  font-size: 14px;
 }
 .main {
   background: #f0f2f5;

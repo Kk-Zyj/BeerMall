@@ -1,8 +1,8 @@
 // src/api/address.ts
 import { request } from '@/api/request'
 
-export function apiAddressList(userId: number) {
-  return request<any[]>(`/api/Address?userId=${userId}`)
+export function apiAddressList() {
+  return request<any[]>('/api/Address')
 }
 
 export function apiAddressCreate(dto: any) {

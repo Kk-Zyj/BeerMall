@@ -180,7 +180,7 @@
 
 <script setup lang="ts">
 import LoginPopup from "@/components/login-popup/login-popup.vue";
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import { onShow, onLoad } from "@dcloudio/uni-app";
 import { useCartStore } from "@/store/cart";
 import { useAuthStore } from "@/store/auth";
@@ -199,9 +199,15 @@ const { payOrder } = useOrderPay();
 const currentAddress = ref<any>(null);
 const deliveryType = ref("express");
 const remark = ref("");
-const couponPrice = ref(0);
 const userStore = useAuthStore();
-const targetGroupBuyId = ref(null); // 目标团ID
+const targetGroupBuyId = ref<any>(null); // 目标团ID
+
+// 拼团相关状态
+const isJoinGroupMode = ref(false); // 是否是“被邀请参团”模式
+const groupRule = ref<GroupByRule>();
+
+// 订单类型：0普通、1开团、2参团
+const orderType = ref(0);
 
 const freightPrice = computed(() => {
   if (deliveryType.value === "self") return 0;
@@ -211,14 +217,209 @@ const freightPrice = computed(() => {
   return 0;
 });
 
-// 拼团相关状态
-const isJoinGroupMode = ref(false); // 是否是“被邀请参团”模式
-const groupRule = ref<GroupByRule>();
+// =========================
+// 优惠券（优化版）
+// =========================
+type CouponItem = {
+  id: number; // userCouponId
+  name: string;
+  amount: number;
+  minPoint: number;
+  expireTime: string;
+};
 
-// --- 优惠券状态 ---
-const availableCoupons = ref([]); // 可用券列表
-const selectedCoupon = ref(null); // 已选中的券
-const selectCouponPopup = ref(null);
+const availableCoupons = ref<CouponItem[]>([]);
+const selectedCoupon = ref<CouponItem | null>(null);
+const selectCouponPopup = ref<any>(null);
+
+const userTouchedCoupon = ref(false); // 用户是否手动选过券
+const couponLoading = ref(false);
+
+// 用于避免重复请求：同一金额只拉一次（除非 force）
+let lastCouponKey = "";
+let inflightCouponPromise: Promise<CouponItem[]> | null = null;
+
+function pickBestCoupon(list: CouponItem[]) {
+  // 优先：优惠金额最大；若相同：门槛 minPoint 更低优先；若还相同：过期更晚优先
+  const sorted = [...list].sort((a, b) => {
+    if (b.amount !== a.amount) return b.amount - a.amount;
+    if (a.minPoint !== b.minPoint) return a.minPoint - b.minPoint;
+    return (b.expireTime || "").localeCompare(a.expireTime || "");
+  });
+  return sorted[0] ?? null;
+}
+
+// 订单“商品金额”（后端校验优惠券门槛用 productAmount，不含运费）
+// 你后端 OrderController 的 coupon 校验是：productAmount < MinPoint => 不可用
+const couponOrderAmount = computed(() => cartStore.totalPrice);
+
+async function loadMyCoupons(force = false) {
+  // 拼团不可用券：清空选择
+  if (orderType.value !== 0) {
+    availableCoupons.value = [];
+    if (selectedCoupon.value) {
+      selectedCoupon.value = null;
+    }
+    return;
+  }
+
+  const uid = userStore.userInfo?.id;
+  if (!uid) return;
+
+  const amount = couponOrderAmount.value;
+  const key = `${uid}:${Math.round(amount * 100)}`;
+
+  if (!force && key === lastCouponKey && availableCoupons.value.length > 0) {
+    return;
+  }
+
+  if (inflightCouponPromise) {
+    await inflightCouponPromise;
+    return;
+  }
+
+  couponLoading.value = true;
+  lastCouponKey = key;
+
+  inflightCouponPromise = (async () => {
+    try {
+      const list = (await apiMyAvailableCoupons(uid, amount)) as any[];
+
+      // 兼容你接口返回结构：这里假设已经是扁平字段（create.vue 原本就是这样用的）
+      const normalized: CouponItem[] = (list || []).map((x: any) => ({
+        id: x.id,
+        name: x.name,
+        amount: Number(x.amount ?? 0),
+        minPoint: Number(x.minPoint ?? 0),
+        expireTime: String(x.expireTime ?? ""),
+      }));
+
+      availableCoupons.value = normalized;
+
+      // 如果当前选中的券已经不在可用列表里：自动取消
+      if (selectedCoupon.value) {
+        const stillOk = normalized.some(
+          (c) => c.id === selectedCoupon.value!.id
+        );
+        if (!stillOk) {
+          selectedCoupon.value = null;
+          if (userTouchedCoupon.value) {
+            uni.showToast({
+              title: "所选优惠券已不可用，已为你取消",
+              icon: "none",
+            });
+          }
+        }
+      }
+
+      // 未手动选择过：自动选最优券
+      if (
+        !userTouchedCoupon.value &&
+        !selectedCoupon.value &&
+        normalized.length > 0
+      ) {
+        selectedCoupon.value = pickBestCoupon(normalized);
+      }
+
+      return normalized;
+    } catch (e: any) {
+      uni.showToast({ title: e?.message || "加载优惠券失败", icon: "none" });
+      availableCoupons.value = [];
+      // 不强制清掉已选券，避免瞬间抖动（除非你想更严格）
+      return [];
+    } finally {
+      couponLoading.value = false;
+      inflightCouponPromise = null;
+    }
+  })();
+
+  await inflightCouponPromise;
+}
+
+// 打开与选择券
+const openCouponList = async () => {
+  if (orderType.value !== 0) {
+    return uni.showToast({ title: "拼团不可用券", icon: "none" });
+  }
+
+  // 先确保列表最新
+  await loadMyCoupons(false);
+
+  if (availableCoupons.value.length === 0) {
+    return uni.showToast({ title: "暂无可用券", icon: "none" });
+  }
+  selectCouponPopup.value.open();
+};
+
+const selectCoupon = (item: CouponItem | null) => {
+  userTouchedCoupon.value = true;
+  selectedCoupon.value = item;
+  selectCouponPopup.value.close();
+};
+
+// 普通购买最终价（含运费 - 优惠）
+const normalFinalPrice = computed(() => {
+  const discount = selectedCoupon.value ? selectedCoupon.value.amount : 0;
+  const total = cartStore.totalPrice + freightPrice.value - discount;
+  return (total > 0 ? total : 0.01).toFixed(2);
+});
+
+// 拼团购买价格 = (商品 + 运费) * 折扣率（你现有逻辑保留）
+const groupFinalPrice = computed(() => {
+  const baseTotal = cartStore.totalPrice + freightPrice.value;
+  const discountRate = groupRule.value?.discountRate ?? 1;
+  const total = baseTotal * discountRate;
+  return (total > 0 ? total : 0).toFixed(2);
+});
+
+// 当前实际支付价格（底部显示）
+const currentPayPrice = computed(() => {
+  if (orderType.value === 0) return normalFinalPrice.value;
+  return groupFinalPrice.value;
+});
+
+// 按钮文案
+const submitBtnText = computed(() => {
+  if (orderType.value === 0) return "提交订单";
+  if (orderType.value === 2) return "立即参团";
+  return "发起拼单";
+});
+
+// 切换购买类型
+const switchType = (type: number) => {
+  if (isJoinGroupMode.value && type === 0) {
+    return uni.showToast({ title: "参团模式下不可切换", icon: "none" });
+  }
+
+  if (type === 1) {
+    orderType.value = isJoinGroupMode.value ? 2 : 1;
+  } else {
+    orderType.value = 0;
+  }
+
+  // 切到拼团：清空券（并提示一次）
+  if (orderType.value !== 0) {
+    if (selectedCoupon.value) selectedCoupon.value = null;
+    if (availableCoupons.value.length) availableCoupons.value = [];
+    userTouchedCoupon.value = false;
+  } else {
+    // 切回普通：重新拉券并自动选最优（如果用户没手选）
+    loadMyCoupons(true);
+  }
+};
+
+// 监听金额变化：自动刷新券（防止券列表与金额不同步）
+let couponTimer: any = null;
+watch(
+  () => [couponOrderAmount.value, orderType.value],
+  () => {
+    if (couponTimer) clearTimeout(couponTimer);
+    couponTimer = setTimeout(() => {
+      loadMyCoupons(false);
+    }, 250);
+  },
+  { immediate: false }
+);
 
 onLoad(async (options) => {
   try {
@@ -227,107 +428,30 @@ onLoad(async (options) => {
     console.error("获取规则失败:", err);
   }
 
-  if (options && options.groupBuyId) {
-    targetGroupBuyId.value = options.groupBuyId;
+  if (options && (options as any).groupBuyId) {
+    targetGroupBuyId.value = (options as any).groupBuyId;
     orderType.value = 2;
+    isJoinGroupMode.value = true;
   }
 });
 
-// 2. 拼团购买价格 = (商品 + 运费) * 折扣率
-// 你的需求：基于订单(含运费)打折
-const groupFinalPrice = computed(() => {
-  let baseTotal = cartStore.totalPrice + freightPrice.value;
-  let discountRate = groupRule.value?.discountRate ?? 1;
-  let total = baseTotal * discountRate;
-  return (total > 0 ? total : 0).toFixed(2);
-});
+onShow(async () => {
+  if (!(await userStore.checkAuth(false))) return;
 
-// 3. 当前实际支付价格 (用于底部显示)
-const currentPayPrice = computed(() => {
-  if (orderType.value === 0) return normalFinalPrice.value;
-  return groupFinalPrice.value;
-});
-
-// 4. 按钮文案
-const submitBtnText = computed(() => {
-  if (orderType.value === 0) return "提交订单";
-  if (orderType.value === 2) return "立即参团"; // 这里的 2 是逻辑上的，UI上可能和 1 合并
-  return "发起拼单";
-});
-
-const finalPrice = computed(() => {
-  let total = cartStore.totalPrice + freightPrice.value - couponPrice.value;
-  return total > 0 ? total : 0;
-});
-
-const orderType = ref(0); // 0=普通, 1=开团
-
-const switchType = (type: number) => {
-  // 如果是被邀请进来的，强制锁死在拼团模式，不能切回单独买
-  if (isJoinGroupMode.value && type === 0) {
-    return uni.showToast({ title: "参团模式下不可切换", icon: "none" });
-  }
-
-  // 如果是正常进来切换到拼团，orderType=1 (开团)
-  // 如果是参团进来，orderType 保持 2
-  if (type === 1) {
-    orderType.value = isJoinGroupMode.value ? 2 : 1;
-  } else {
-    orderType.value = 0;
-  }
-};
-
-// --- 获取可用券列表 ---
-const loadMyCoupons = async () => {
-  if (orderType.value !== 0) return;
-
-  try {
-    availableCoupons.value = await apiMyAvailableCoupons(
-      userStore.userInfo.id,
-      cartStore.totalPrice
-    );
-    if (availableCoupons.value.length > 0) {
-      selectedCoupon.value = availableCoupons.value[0];
-    }
-  } catch (e: any) {
-    uni.showToast({ title: e?.message || "加载优惠券失败", icon: "none" });
-  }
-};
-
-// --- 打开与选择券 ---
-const openCouponList = () => {
-  if (orderType.value !== 0)
-    return uni.showToast({ title: "拼团不可用券", icon: "none" });
-  if (availableCoupons.value.length === 0)
-    return uni.showToast({ title: "暂无可用券", icon: "none" });
-  selectCouponPopup.value.open();
-};
-
-const selectCoupon = (item) => {
-  selectedCoupon.value = item;
-  selectCouponPopup.value.close();
-};
-
-// --- 🔥 修改价格计算逻辑 ---
-const normalFinalPrice = computed(() => {
-  let discount = selectedCoupon.value ? selectedCoupon.value.amount : 0;
-  let total = cartStore.totalPrice + freightPrice.value - discount;
-  return (total > 0 ? total : 0.01).toFixed(2); // 最少支付一分钱
-});
-
-onShow(() => {
   if (!currentAddress.value) {
-    loadDefaultAddress();
+    await loadDefaultAddress();
   }
+
   uni.$once("selectAddress", (addr: any) => {
     currentAddress.value = addr;
   });
-  loadMyCoupons(); // 加载可用券列表
+
+  loadMyCoupons(true);
 });
 
 const loadDefaultAddress = async () => {
   try {
-    const list = await apiAddressList(userStore.userInfo.id);
+    const list = await apiAddressList();
     if (list && list.length > 0) {
       const def = list.find((a: any) => a.isDefault) || list[0];
       currentAddress.value = def;
@@ -345,22 +469,14 @@ const chooseAddress = () => {
   uni.navigateTo({ url: "/pages/address/list?mode=select" });
 };
 
-const openCoupon = () => {
-  if (orderType.value !== 0)
-    return uni.showToast({ title: "拼团不可用券", icon: "none" });
-  uni.showToast({ title: "暂无可用优惠券", icon: "none" });
-};
-
 const submitOrder = async () => {
-  console.info("提交订单前检查权限");
-  if (!(await userStore.checkAuth())) return;
+  if (!(await userStore.checkAuth(true))) return;
   if (deliveryType.value !== "self" && !currentAddress.value) {
     uni.showToast({ title: "请选择收货地址", icon: "none" });
     return;
   }
 
   const postData = {
-    userId: userStore.userInfo.id,
     addressId: currentAddress.value?.id || 0,
     deliveryMethod: deliveryType.value,
     remark: remark.value,
@@ -375,17 +491,14 @@ const submitOrder = async () => {
   try {
     const res: any = await apiCreateOrder(postData);
     const orderId = res?.orderId;
-    if (!orderId) {
-      throw new Error("下单失败");
-    }
+    if (!orderId) throw new Error("下单失败");
 
     await payOrder({
       orderId,
-      onCancel: () => {
-        redirectToDetail(orderId);
-      },
+      orderNo: orderId,
+      onCancel: () => redirectToDetail(orderId),
       onPaid: async () => {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1200));
         redirectToDetail(orderId);
       },
     });
@@ -395,21 +508,17 @@ const submitOrder = async () => {
     uni.hideLoading();
   }
 };
-
 // 统一跳转函数
 const redirectToDetail = (orderId: number) => {
-  // 使用 replace 防止用户点返回键回到“提交订单页”重复提交
-  uni.redirectTo({
-    url: `/pages/order/detail?id=${orderId}`,
-  });
+  uni.redirectTo({ url: `/pages/order/detail?id=${orderId}` });
 };
+
 const getImageUrl = (path: string | undefined) => {
   if (!path) return "/static/logo.png";
   if (path.startsWith("http") || path.startsWith("/static")) return path;
   return API_BASE_URL + path;
 };
 </script>
-
 <style scoped lang="scss">
 .page-container {
   padding: 20rpx;

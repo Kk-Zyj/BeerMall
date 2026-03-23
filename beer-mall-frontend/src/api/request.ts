@@ -3,6 +3,8 @@ import { API_BASE_URL } from '@/config/api'
 
 type UniRequestMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
 
+const TOKEN_KEY = 'token'
+
 export interface ApiEnvelope<T> {
   code: number
   message: string
@@ -52,14 +54,10 @@ function showError(msg: string, silent?: boolean) {
   try {
     uni.showToast({ title: msg, icon: 'none' })
   } catch {
-    // 防止极端情况下 toast 也引起异常
+    // ignore
   }
 }
 
-/**
- * request<T>：返回后端 ApiResponse 的 data（即 T）
- * - code != 0：抛 ApiError
- */
 export function request<T>(
   path: string,
   options?: {
@@ -72,6 +70,7 @@ export function request<T>(
 ): Promise<T> {
   const url = joinUrl(API_BASE_URL, path)
   const method = options?.method ?? 'GET'
+  const token = uni.getStorageSync(TOKEN_KEY)
 
   return new Promise<T>((resolve, reject) => {
     uni.request({
@@ -80,17 +79,22 @@ export function request<T>(
       data: options?.data,
       header: {
         'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options?.headers ?? {}),
       },
       timeout: options?.timeout ?? 15000,
       success: (res: any) => {
-        // HTTP 层
         if (!res || typeof res.statusCode !== 'number') {
           const err = new ApiError('网络异常：无响应')
           showError(err.message, options?.silent)
           reject(err)
           return
         }
+
+        if (res.statusCode === 401) {
+          uni.removeStorageSync(TOKEN_KEY)
+        }
+
         if (res.statusCode < 200 || res.statusCode >= 300) {
           const msg =
             (isPlainObject(res.data) && (res.data.message || res.data.error)) ||
@@ -101,7 +105,6 @@ export function request<T>(
           return
         }
 
-        // 业务层：只在 res.data 是普通对象时才尝试解包
         const body = res.data
         if (
           isPlainObject(body) &&
@@ -123,7 +126,6 @@ export function request<T>(
           return
         }
 
-        // 兼容：如果某些接口没包 ApiResponse（理论上不该发生）
         resolve(body as T)
       },
       fail: (err: any) => {

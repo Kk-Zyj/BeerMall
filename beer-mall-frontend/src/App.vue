@@ -4,11 +4,12 @@ import { useAuthStore } from "@/store/auth";
 
 const userStore = useAuthStore();
 
-onLaunch(() => {
+onLaunch(async () => {
   console.log("App Launch");
-  // 启动即登录，建立影子账号
-  userStore.silentLogin();
+  // 启动时先尝试从本地缓存恢复；没有缓存才走微信静默登录
+  await userStore.initAuth();
 });
+
 onShow(() => {
   console.log("App Show");
 });

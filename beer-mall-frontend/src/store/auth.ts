@@ -5,6 +5,7 @@ import { apiLogin, apiBindMobile } from '@/api/auth'
 import { ApiError } from '@/api/request'
 
 const STORAGE_KEY = 'userInfo'
+const TOKEN_KEY = 'token'
 
 function toast(msg: string) {
   uni.showToast({ title: msg, icon: 'none' })
@@ -17,10 +18,14 @@ export const useAuthStore = defineStore('auth', () => {
     avatar?: string
     mobile?: string
   } | null>(null)
+
   const isLogin = ref(false)
   const showLoginPopup = ref(false)
 
-  // 防止 silentLogin 并发
+  // 是否已经完成初始化（避免重复 silentLogin）
+  const inited = ref(false)
+
+  // 防止并发重复登录
   const _loginPromise = ref<Promise<void> | null>(null)
 
   function _setUser(data: any) {
@@ -29,22 +34,73 @@ export const useAuthStore = defineStore('auth', () => {
     uni.setStorageSync(STORAGE_KEY, data)
   }
 
+  function _setToken(token?: string) {
+    if (token) {
+      uni.setStorageSync(TOKEN_KEY, token)
+    }
+  }
+
+  function _clearAuth() {
+    userInfo.value = null
+    isLogin.value = false
+    showLoginPopup.value = false
+    uni.removeStorageSync(STORAGE_KEY)
+    uni.removeStorageSync(TOKEN_KEY)
+  }
+
+  function getToken() {
+    return uni.getStorageSync(TOKEN_KEY)
+  }
+
   function loadFromCache() {
     const cache = uni.getStorageSync(STORAGE_KEY)
-    if (cache?.id) {
+    const token = uni.getStorageSync(TOKEN_KEY)
+
+    if (cache?.id && token) {
       userInfo.value = cache
       isLogin.value = true
       return true
     }
+
+    // 兼容旧缓存：只要有一半缺失，就都清掉
+    if (cache || token) {
+      uni.removeStorageSync(STORAGE_KEY)
+      uni.removeStorageSync(TOKEN_KEY)
+    }
+
+    userInfo.value = null
+    isLogin.value = false
     return false
   }
 
-  async function silentLogin() {
+  /**
+   * 初始化登录状态：
+   * 1. 优先从本地缓存恢复
+   * 2. 本地没有时，再走微信 silent login
+   */
+  async function initAuth() {
+    if (inited.value) return
+    if (loadFromCache()) {
+      inited.value = true
+      return
+    }
+
+    await silentLogin()
+    inited.value = true
+  }
+
+  /**
+   * 微信静默登录
+   * force = true 时，忽略缓存重新登录
+   */
+  async function silentLogin(force = false) {
+    if (!force && loadFromCache()) {
+      return
+    }
+
     if (_loginPromise.value) return _loginPromise.value
 
     _loginPromise.value = (async () => {
-      if (loadFromCache()) return
-
       const res = await uni.login({ provider: 'weixin' })
       if (!res?.code) {
         toast('微信登录失败')
@@ -53,18 +109,31 @@ export const useAuthStore = defineStore('auth', () => {
 
       try {
         const data = await apiLogin(res.code)
-        const id = data.userId ?? data.id
+
+        const token = data.token
+        const user = data.user
+        const id = user?.id ?? data.userId
+
         if (!id) {
           toast('登录失败：缺少用户ID')
           return
         }
+
+        if (!token) {
+          toast('登录失败：缺少Token')
+          return
+        }
+
+        _setToken(token)
         _setUser({
           id,
-          name: '微信用户',
-          avatar: '/static/default-avatar.png',
-          mobile: data.mobile ?? '',
+          name: user?.nickName ?? data.nickName ?? '微信用户',
+          avatar:
+            user?.avatarUrl ?? data.avatarUrl ?? '/static/default-avatar.png',
+          mobile: user?.mobile ?? data.mobile ?? '',
         })
       } catch (e: any) {
+        _clearAuth()
         const msg = e instanceof ApiError ? e.message : e?.message || '登录失败'
         toast(msg)
         throw e
@@ -76,26 +145,27 @@ export const useAuthStore = defineStore('auth', () => {
     return _loginPromise.value
   }
 
-  // 绑定手机号：你页面 getPhoneNumber 成功后拿到的 phoneCode 传进来
   async function bindMobile(phoneCode: string) {
-    if (!userInfo.value?.id) await silentLogin()
-    if (!userInfo.value?.id) throw new Error('用户未初始化，无法绑定手机号')
+    if (!userInfo.value?.id) {
+      await silentLogin()
+    }
+    if (!userInfo.value?.id) {
+      throw new Error('用户未初始化，无法绑定手机号')
+    }
 
     try {
-      const res = await apiBindMobile({
-        userId: userInfo.value.id,
-        code: phoneCode,
-      })
+      const res = await apiBindMobile({ code: phoneCode })
 
-      // 后端可能返回：{ success, mobile } 或者直接给 mobile/isMobileVerified
       const ok = (res as any)?.success ?? true
       if (!ok) {
         toast('绑定失败')
         return false
       }
 
-      userInfo.value.mobile = (res as any)?.mobile ?? userInfo.value.mobile
+      const mobile = res?.user?.mobile ?? (res as any)?.mobile ?? ''
+      userInfo.value.mobile = mobile
       uni.setStorageSync(STORAGE_KEY, userInfo.value)
+
       showLoginPopup.value = false
       uni.showToast({ title: '授权成功', icon: 'success' })
       return true
@@ -107,40 +177,37 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  /**
-   * 检查：是否满足访问条件
-   * - requireMobile=true：下单/支付等必须手机号
-   * - requireMobile=false：只要影子用户
-   */
   async function checkAuth(requireMobile = true): Promise<boolean> {
-    if (!userInfo.value?.id) {
-      toast('正在初始化...')
-      await silentLogin()
+    if (!inited.value) {
+      await initAuth()
     }
-    if (!userInfo.value?.id) return false
+
+    if (!userInfo.value?.id) {
+      return false
+    }
 
     if (requireMobile && !userInfo.value.mobile) {
       showLoginPopup.value = true
       return false
     }
+
     return true
   }
 
-  // 退出：清本地缓存；后端没 logout 接口，所以仅本地处理
-  async function logout() {
-    userInfo.value = null
-    isLogin.value = false
-    showLoginPopup.value = false
-    uni.removeStorageSync(STORAGE_KEY)
-
-    // 退出后回到影子用户（体验更顺：还能浏览/加购）
-    await silentLogin()
+  /**
+   * 退出登录：
+   * 这里只清状态，不再自动重新 silentLogin
+   */
+  function logout() {
+    _clearAuth()
+    inited.value = false
     toast('已退出登录')
   }
 
   function openLoginPopup() {
     showLoginPopup.value = true
   }
+
   function closeLoginPopup() {
     showLoginPopup.value = false
   }
@@ -149,6 +216,9 @@ export const useAuthStore = defineStore('auth', () => {
     userInfo,
     isLogin,
     showLoginPopup,
+    inited,
+    getToken,
+    initAuth,
     silentLogin,
     bindMobile,
     checkAuth,

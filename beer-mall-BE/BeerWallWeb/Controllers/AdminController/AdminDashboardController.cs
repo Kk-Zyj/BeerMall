@@ -1,9 +1,11 @@
 ﻿using BeerMall.Api.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization;
 
 namespace BeerMall.Api.Controllers
 {
+    [Authorize(Roles = "Admin")]
     [Route("api/admin/dashboard")]
     [ApiController]
     public class AdminDashboardController : ControllerBase

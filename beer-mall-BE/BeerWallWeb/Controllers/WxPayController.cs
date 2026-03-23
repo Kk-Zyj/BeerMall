@@ -1,5 +1,7 @@
-﻿using BeerWallWeb.Models;
+﻿using BeerWallWeb.Extensions;
+using BeerWallWeb.Models;
 using BeerWallWeb.WxPay;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace BeerMall.Api.Controllers;
@@ -12,11 +14,15 @@ public class WxPayController : ControllerBase
 
     public WxPayController(WxPayService wxPay) => _wxPay = wxPay;
 
+    [Authorize]
     [HttpPost("prepay")]
     public async Task<IActionResult> Prepay([FromBody] PrepayRequest req)
     {
+        var userId = User.GetUserId();
+        Ensure(userId > 0, "登录状态无效", 45000, 401);
         Ensure(req.OrderId > 0, "orderId无效", 45001);
-        var payParams = await _wxPay.CreateJsapiPrepayAsync(req.OrderId);
+
+        var payParams = await _wxPay.CreateJsapiPrepayAsync(req.OrderId, userId);
         return Ok(payParams);
     }
 

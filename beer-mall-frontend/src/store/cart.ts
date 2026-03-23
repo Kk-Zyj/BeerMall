@@ -24,18 +24,14 @@ export const useCartStore = defineStore('cart', () => {
     ),
   )
 
-  async function _ensureUserId(): Promise<number> {
-    // 购物车允许影子用户
+  async function _ensureLogin() {
     const ok = await auth.checkAuth(false)
-    if (!ok || !auth.userInfo?.id) throw new Error('用户未初始化')
-    return auth.userInfo.id
+    if (!ok) throw new Error('用户未初始化')
   }
 
   async function refresh() {
-    const userId = await _ensureUserId()
-    const res = await apiGetCart(userId)
-    console.log(res.items)
-
+    await _ensureLogin()
+    const res = await apiGetCart()
     cartList.value = res?.items ?? []
   }
 
@@ -44,8 +40,8 @@ export const useCartStore = defineStore('cart', () => {
     skuId: number
     quantity: number
   }) {
-    const userId = await _ensureUserId()
-    const res = await apiCartAdd({ userId, ...payload })
+    await _ensureLogin()
+    const res = await apiCartAdd(payload)
     cartList.value = res?.items ?? []
   }
 
@@ -65,10 +61,6 @@ export const useCartStore = defineStore('cart', () => {
     })
   }
 
-  /**
-   * 改数量：后端无 setQuantity，用 delta 实现
-   * delta = newQty - oldQty，走 /api/Cart/add
-   */
   async function setQuantity(item: CartItem, newQty: number) {
     newQty = Math.max(0, Math.floor(newQty))
     const oldQty = item.quantity || 0
@@ -81,7 +73,6 @@ export const useCartStore = defineStore('cart', () => {
     })
   }
 
-  // 删除单条：delta = -当前数量
   async function removeItem(item: CartItem) {
     const qty = item.quantity || 0
     if (qty <= 0) return
@@ -93,13 +84,12 @@ export const useCartStore = defineStore('cart', () => {
   }
 
   async function clear() {
-    const userId = await _ensureUserId()
-    await apiClearCart(userId)
+    await _ensureLogin()
+    await apiClearCart()
     cartList.value = []
     uni.showToast({ title: '购物车已清空', icon: 'success' })
   }
 
-  // 统一错误包装（页面调用更省心）
   async function safeRun<T>(fn: () => Promise<T>) {
     try {
       return await fn()
